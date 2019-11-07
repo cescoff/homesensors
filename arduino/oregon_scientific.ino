@@ -1,8 +1,15 @@
+#include <RH_ASK.h>
+#include <SPI.h> 
+
+// Create Amplitude Shift Keying Object
+RH_ASK rf_driver;
+
 const int INPUT_PIN = 2;
 byte state = LOW;
 unsigned long lastStateChange = 0;
 unsigned long lastPulseWidth = 0;
-const int MAX_BUFFER = 1024;
+// Initial value was 1024 but within radiohead it consumes too much memory
+const int MAX_BUFFER = 845;
 int bufferUpTo = 0;
 char buffer[MAX_BUFFER];
 
@@ -14,6 +21,9 @@ void setup() {
   Serial.begin(115200);
   pinMode(INPUT_PIN, INPUT_PULLUP);
   attachInterrupt((INPUT_PIN), changed, CHANGE);
+
+    // Initialize ASK Object
+    rf_driver.init();
 }
 
 void changed() { }
@@ -68,11 +78,10 @@ void printResult(char* buf, int bufferUpTo) {
     if (remaining != 0) {
       bool checksumOK = checksum[0] == result[13] && checksum[1] == result[12];
       if (checksumOK) {
-        sprintf(string, "TEMPERATURE=%c%c%c.%c", result[11] != '0' ? '-' : '+', result[10], result[9], result[8]);
-        Serial.print("MSG://");
-        Serial.print(SENSOR_UUID);
-        Serial.print(";");
+        sprintf(string, "%s;TEMPERATURE=%c%c%c.%c", SENSOR_UUID, result[11] != '0' ? '-' : '+', result[10], result[9], result[8]);
         Serial.println(string);
+        
+        rf_driver.send((uint8_t *)string, strlen(string));
       }
     }
   } while (remaining != 0 && remaining - buf < bufferUpTo);

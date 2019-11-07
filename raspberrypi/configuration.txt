@@ -6,3 +6,9 @@ tty for arduino is : ttyACM0 (in most of the cases)
 run tail -f on /dev/ttyACM0 will print you all serial messages
 
 _________________________________________________________________________
+
+For temperature use kernel modules w1-therm w1-gpio
+
+temperature sensor is here : /sys/bus/w1/devices/28-021319287faa
+
+_________________________________________________________________________

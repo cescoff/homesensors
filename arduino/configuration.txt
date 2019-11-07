@@ -3,6 +3,10 @@ Arduino NANO under macos
 Here is a page that describes how to do : https://medium.com/@thuc/connect-arduino-nano-with-mac-osx-f922a46c0a5d
 Here is the USB driver page : https://github.com/ledongthuc/example/blob/master/file/CH34x_Install_V1.3.zip
 
+Use BOARD ARDUINO NANO
+Use Processor ATMmega328P. (Old bootloader)
+Use port cu.wchusb410...
+
 ______________
 
 Arduino NANO under linux (raspberry pi)

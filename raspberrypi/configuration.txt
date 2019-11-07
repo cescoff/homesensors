@@ -1,0 +1,8 @@
+How to configure RASPBERRYPI serial read for arduino serial communication
+
+stty -F /dev/ttyACM0 cs8 115200 ignbrk -brkint -icrnl -imaxbel -opost -onlcr -isig -icanon -iexten -echo -echoe -echok -echoctl -echoke noflsh -ixon -crtscts
+tty for arduino is : ttyACM0 (in most of the cases)
+
+run tail -f on /dev/ttyACM0 will print you all serial messages
+
+_________________________________________________________________________

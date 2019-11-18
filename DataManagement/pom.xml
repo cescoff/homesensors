@@ -6,7 +6,11 @@
 
     <groupId>HomeSensors</groupId>
     <artifactId>DataManagement</artifactId>
+    <packaging>pom</packaging>
     <version>1.0-SNAPSHOT</version>
+    <modules>
+        <module>CommandLine</module>
+    </modules>
     <dependencies>
         <dependency>
             <groupId>commons-io</groupId>

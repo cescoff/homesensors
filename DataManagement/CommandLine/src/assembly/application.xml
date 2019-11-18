@@ -14,7 +14,7 @@
 
             <!-- Now, select which projects to include in this module-set. -->
             <includes>
-                <include>HomeSensors:DataManagement</include>
+                <include>homesensors:datamanagement</include>
             </includes>
             <binaries>
                 <outputDirectory>lib</outputDirectory>

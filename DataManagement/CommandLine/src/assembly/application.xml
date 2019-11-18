@@ -14,7 +14,7 @@
 
             <!-- Now, select which projects to include in this module-set. -->
             <includes>
-                <include>HomeSensors:DataManagement</include>
+                <include>HomeSensors:PlatformSynchronizer</include>
             </includes>
             <binaries>
                 <outputDirectory>lib</outputDirectory>

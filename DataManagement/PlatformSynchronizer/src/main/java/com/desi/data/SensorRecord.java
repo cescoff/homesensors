@@ -1,4 +1,4 @@
-package com.desi.sensors.data;
+package com.desi.data;
 
 import org.joda.time.LocalDateTime;
 

@@ -1,7 +1,6 @@
-package com.desi.sensors.data;
+package com.desi.data;
 
 import com.google.common.base.Optional;
-import org.joda.time.DateTime;
 import org.joda.time.LocalDateTime;
 
 public interface Connector {

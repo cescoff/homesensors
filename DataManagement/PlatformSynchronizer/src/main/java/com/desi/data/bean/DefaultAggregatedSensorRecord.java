@@ -1,9 +1,9 @@
-package com.desi.sensors.data.bean;
+package com.desi.data.bean;
 
-import com.desi.sensors.data.AggregatedSensorRecord;
-import com.desi.sensors.data.SensorNameProvider;
-import com.desi.sensors.data.SensorRecord;
-import com.desi.sensors.data.SensorUnit;
+import com.desi.data.AggregatedSensorRecord;
+import com.desi.data.SensorNameProvider;
+import com.desi.data.SensorRecord;
+import com.desi.data.SensorUnit;
 import com.google.common.collect.*;
 import org.joda.time.LocalDateTime;
 

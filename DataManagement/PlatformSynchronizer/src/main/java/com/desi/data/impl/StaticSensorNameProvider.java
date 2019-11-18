@@ -1,6 +1,6 @@
-package com.desi.sensors.data.impl;
+package com.desi.data.impl;
 
-import com.desi.sensors.data.SensorNameProvider;
+import com.desi.data.SensorNameProvider;
 import com.google.common.collect.ImmutableMap;
 import com.google.common.collect.Maps;
 

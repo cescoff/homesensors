@@ -1,8 +1,7 @@
-package com.desi.sensors.data.bean;
+package com.desi.data.bean;
 
-import com.desi.sensors.data.SensorRecord;
-import com.desi.sensors.data.SensorUnit;
-import org.joda.time.LocalDate;
+import com.desi.data.SensorRecord;
+import com.desi.data.SensorUnit;
 import org.joda.time.LocalDateTime;
 
 public class TemperatureRecord implements SensorRecord {

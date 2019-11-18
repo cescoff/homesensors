@@ -26,7 +26,7 @@ pipeline {
                     echo "SUCCESS"
                     echo "Deploying app server"
                     sh '''
-                        cp -r CommandLine/target/CommandLine-1.0-SNAPSHOT-server/lib /var/lib/jenkins/homesensors/
+                        cp -r DataManagement/CommandLine/target/CommandLine-1.0-SNAPSHOT-server/lib /var/lib/jenkins/homesensors/
                     '''
                     echo 'Done refreshing app server (BUILD_ID added)'
                 }

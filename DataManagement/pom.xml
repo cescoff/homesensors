@@ -9,8 +9,8 @@
     <packaging>pom</packaging>
     <version>1.0-SNAPSHOT</version>
     <modules>
-        <module>CommandLine</module>
         <module>PlatformSynchronizer</module>
+        <module>CommandLine</module>
     </modules>
     <dependencies>
         <dependency>

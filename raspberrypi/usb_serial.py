@@ -2,7 +2,7 @@ import serial
 import re
 from datetime import datetime
 
-pattern = re.compile("MSG://([a-z0-9\-]+);(C=[\+\-]+[0-9]+\.[0-9]+)");
+pattern = re.compile("MSG://([a-z0-9\-]+);(C=[\+\-]*[0-9]+\.[0-9]+)");
 
 ser = serial.Serial('/dev/ttyUSB0', 9600)
 while 1: 

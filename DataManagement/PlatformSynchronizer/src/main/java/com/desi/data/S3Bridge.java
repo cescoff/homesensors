@@ -9,8 +9,10 @@ import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.desi.data.bean.TemperatureRecord;
+import com.desi.data.config.AWSCredentialsConfig;
 import com.desi.data.impl.StaticSensorNameProvider;
 import com.desi.data.spreadsheet.SpreadSheetConverter;
+import com.desi.data.utils.JAXBUtils;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
@@ -29,6 +31,7 @@ import org.slf4j.LoggerFactory;
 
 import java.io.*;
 import java.util.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 public class S3Bridge {
 
@@ -43,9 +46,48 @@ public class S3Bridge {
 
     private final Iterable<Connector> connectors;
 
-    public S3Bridge(Iterable<Connector> connectors) {
+    private final File awsCredentialsConfigurationFile;
+
+    private final AWSClientId clientId;
+
+    private String accessKey;
+
+    private String secretKey;
+
+    private AtomicBoolean INIT_DONE = new AtomicBoolean(false);
+
+    public S3Bridge(Iterable<Connector> connectors, File awsCredentialsConfigurationFile, AWSClientId clientId) {
         this.connectors = connectors;
+        this.awsCredentialsConfigurationFile = awsCredentialsConfigurationFile;
+        this.clientId = clientId;
     }
+
+
+    private synchronized void init() {
+        if (INIT_DONE.get()) {
+            return;
+        }
+        if (!this.awsCredentialsConfigurationFile.exists()) {
+            throw new IllegalStateException("Credentials file '" + this.awsCredentialsConfigurationFile.getPath() + "' does not exist");
+        }
+
+        final AWSCredentialsConfig config;
+        try {
+            config = JAXBUtils.unmarshal(AWSCredentialsConfig.class, this.awsCredentialsConfigurationFile);
+        } catch (Throwable t) {
+            throw new IllegalStateException("Malformed file '" + this.awsCredentialsConfigurationFile.getPath() + "'", t);
+        }
+        for (final AWSCredentialsConfig.Credentials credentials : config.getCredentials()) {
+            if (credentials.getId() == this.clientId) {
+                this.accessKey = credentials.getAccessKey();
+                this.secretKey = credentials.getSecretKey();
+                this.INIT_DONE.set(true);
+                return;
+            }
+        }
+        throw new IllegalStateException("No service '" + this.clientId + "' configured into file '" + this.awsCredentialsConfigurationFile.getPath() + "'");
+    }
+
 
     public boolean sync() {
         if (Iterables.isEmpty(connectors)) {
@@ -53,8 +95,10 @@ public class S3Bridge {
             return false;
         }
 
+        init();
+
         final AmazonS3 s3 = AmazonS3ClientBuilder.standard().
-                withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials("AKIAQ6Y7B4AGYMC2VTPG", "sXLMkvLEAmPd1khHVy4anY+VKBUHTFn0sLNdmhYV"))).
+                withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessKey, secretKey))).
                 withRegion(REGION).
                 build();
         final ListObjectsV2Result result = s3.listObjectsV2(BUCKET_NAME);
@@ -107,7 +151,7 @@ public class S3Bridge {
 
                 try {
                     if (!connector.addRecords(filteredSensorRecords, new StaticSensorNameProvider())) {
-                        logger.error("Failed to add records to connector '" + connector.getClass().getSimpleName() + "'");
+                        logger.warn("No record sent by connector '" + connector.getClass().getSimpleName() + "'");
                     } else {
                         if (!connector.end()) {
                             logger.error("Failed to end connector '" + connector.getClass().getSimpleName() + "'");
@@ -119,7 +163,7 @@ public class S3Bridge {
             }
         }
 
-        return false;
+        return true;
     }
 
     private Iterable<String> getSensorUUIDs(final Iterable<SensorRecord> records) {
@@ -170,6 +214,11 @@ public class S3Bridge {
     }
 
     public static void main(String[] args) {
+        if (args.length != 1) {
+            System.out.println("Usage " + S3Bridge.class.getSimpleName() + " <CREDENTIALS_FILE_PATH>");
+            System.exit(2);
+            return;
+        }
         final Properties logConfig = new Properties();
 
         logConfig.setProperty("log4j.rootLogger", "INFO, Appender1,Appender2");
@@ -182,8 +231,16 @@ public class S3Bridge {
         logConfig.setProperty("log4j.appender.Appender2.layout.ConversionPattern", "%-7p %d [%t] %c %x - %m%n");
 
         PropertyConfigurator.configure(logConfig);
-
-        new S3Bridge(ImmutableList.<Connector>of(new SpreadSheetConverter())).sync();
+        try {
+            if (!new S3Bridge(ImmutableList.<Connector>of(new SpreadSheetConverter()), new File(args[0]), AWSClientId.S3Bridge).sync()) {
+                logger.warn("Synchronization process returned any data synchronized");
+                System.exit(4);
+            }
+        } catch (Throwable t) {
+            logger.error("An error has occured", t);
+            System.exit(4);
+        }
+        System.exit(1);
     }
 
 }

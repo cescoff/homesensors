@@ -37,6 +37,7 @@ exports.SensorCheckpoint = (req, res) => {
       });
       console.log('Max value is ' + max);
       res.status(200).send(max);
+      return;
     } else {
       console.log('No data found.');
     }

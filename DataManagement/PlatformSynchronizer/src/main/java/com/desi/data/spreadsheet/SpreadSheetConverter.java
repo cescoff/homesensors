@@ -184,6 +184,8 @@ public class SpreadSheetConverter implements Connector {
         jsonSensorData.remove(jsonSensorData.length() - 1);
         jsonOutput.put("SensorData", jsonSensorData);
 
+        logger.info("Sending " + jsonSensorData.length() + " rows");
+
 /*        final FileOutputStream fileOutputStreamCSV = new FileOutputStream(new File("Temperatures.csv"));
         fileOutputStreamCSV.write(csvOut.toString().getBytes());
         fileOutputStreamCSV.close();

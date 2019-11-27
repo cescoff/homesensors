@@ -18,4 +18,6 @@ public interface AggregatedSensorRecord {
 
     public boolean addValue(final SensorRecord record);
 
+    public boolean hasSensorValue(final String uuid);
+
 }

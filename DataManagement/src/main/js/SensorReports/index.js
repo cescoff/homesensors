@@ -61,7 +61,7 @@ function addData(res, sensorData, firstLineValues) {
             for (var columnIndex = 0; columnIndex < firstLineValues.length; columnIndex++) {
                 for (var sensorValueIndex = 0; sensorValueIndex < sensorData[index].Sensors.length; sensorValueIndex++) {
                     if (sensorData[index].Sensors[sensorValueIndex].UUID == firstLineValues[columnIndex]) {
-                        if (sensorData[index].Sensors[sensorValueIndex].Value == "0") {
+                        if (!sensorData[index].Sensors[sensorValueIndex].HasValue) {
                             lineValues.push("");
                             lineValues.push(sensorData[index].Sensors[sensorValueIndex].Value);
                             lineValues.push("");

@@ -59,6 +59,10 @@ public class DefaultAggregatedSensorRecord implements AggregatedSensorRecord {
         return 0;
     }
 
+    public boolean hasSensorValue(final String uuid) {
+        return recordsByUUID.containsKey(uuid);
+    }
+
     public boolean addValue(SensorRecord record) {
         if (record.getDateTaken().isBefore(begin) || record.getDateTaken().isAfter(end) || record.getDateTaken().equals(end)) {
             return false;

@@ -1,31 +1,24 @@
-#include <RH_ASK.h>
-#include <SPI.h> 
-
-// Create Amplitude Shift Keying Object
-RH_ASK rf_driver;
 
 const int INPUT_PIN = 2;
+
 byte state = LOW;
 unsigned long lastStateChange = 0;
 unsigned long lastPulseWidth = 0;
 // Initial value was 1024 but within radiohead it consumes too much memory
-const int MAX_BUFFER = 845;
+// Works fine with 845, but needed to reduce it to 692 because of some extra features added for temperature measures
+const int MAX_BUFFER = 1224;
 int bufferUpTo = 0;
 char buffer[MAX_BUFFER];
 
-const char* SENSOR_UUID = "9ad754a1-4ae1-4a73-9658-734e19747617";
+const char* OREGON_S_SENSOR_UUID = "9ad754a1-4ae1-4a73-9658-734e19747617";
 
 int preambleCount = 0;
-
-unsigned long lastPingMillis = 0;
 
 void setup() {
   Serial.begin(115200);
   pinMode(INPUT_PIN, INPUT_PULLUP);
   attachInterrupt((INPUT_PIN), changed, CHANGE);
 
-    // Initialize ASK Object
-  rf_driver.init();
 }
 
 void changed() { }
@@ -67,7 +60,7 @@ void receivePulse(unsigned long lowPulseWidth, unsigned long highPulseWidth) {
 }
 
 void printResult(char* buf, int bufferUpTo) {
-  char string[150];
+  char string[75];
   char result[50];
   char checksum[5];
   buffer[bufferUpTo++] = 0;
@@ -80,11 +73,8 @@ void printResult(char* buf, int bufferUpTo) {
     if (remaining != 0) {
       bool checksumOK = checksum[0] == result[13] && checksum[1] == result[12];
       if (checksumOK) {
-        sprintf(string, "%s;C=%c%c%c.%c", SENSOR_UUID, result[11] != '0' ? '-' : '+', result[10], result[9], result[8]);
+        sprintf(string, "MSG://%s;C=%c%c%c.%c", OREGON_S_SENSOR_UUID, result[11] != '0' ? '-' : '+', result[10], result[9], result[8]);
         Serial.println(string);
-        
-        rf_driver.send((uint8_t *)string, strlen(string));
-        rf_driver.waitPacketSent();
       }
     }
   } while (remaining != 0 && remaining - buf < bufferUpTo);
@@ -129,19 +119,6 @@ char* decodeBuffer(char* buf, char* strResult, char* strChecksum) {
 }
 
 void loop() {
-  if (lastPingMillis == 0) {
-    lastPingMillis = millis();
-  }
-  if ((millis() - lastPingMillis) >= 50000) {
-    Serial.print(SENSOR_UUID);
-    Serial.print(";");
-    Serial.println("C=PING");
-    char string[150];
-    sprintf(string, "%s;C=PING", SENSOR_UUID);
-    rf_driver.send((uint8_t *)string, strlen(string));
-    rf_driver.waitPacketSent();
-    lastPingMillis = millis();
-  }
   // put your main code here, to run repeatedly:
   byte oldState = state;
   state = digitalRead(INPUT_PIN);

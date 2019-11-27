@@ -13,6 +13,7 @@ public class StaticSensorNameProvider implements SensorNameProvider {
     static {
         names.put("83ddd733-7ac4-4de2-a188-07b97977e9c0", "Bureau");
         names.put("9ad754a1-4ae1-4a73-9658-734e19747617", "Exterieur");
+        names.put("eef014ca-4261-40a8-aecd-ec41e466e5d0", "Salle de bain");
     }
 
 

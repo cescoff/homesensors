@@ -9,10 +9,12 @@ import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.desi.data.bean.TemperatureRecord;
-import com.desi.data.config.AWSCredentialsConfig;
+import com.desi.data.bigquery.BigQueryConnector;
+import com.desi.data.config.PlatformCredentialsConfig;
 import com.desi.data.impl.StaticSensorNameProvider;
 import com.desi.data.spreadsheet.SpreadSheetConverter;
 import com.desi.data.utils.JAXBUtils;
+import com.desi.data.zoho.ZohoFileConnector;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
@@ -48,7 +50,9 @@ public class S3Bridge {
 
     private final File awsCredentialsConfigurationFile;
 
-    private final AWSClientId clientId;
+    private PlatformCredentialsConfig credentialsConfig;
+
+    private final PlatformClientId clientId;
 
     private String accessKey;
 
@@ -56,7 +60,7 @@ public class S3Bridge {
 
     private AtomicBoolean INIT_DONE = new AtomicBoolean(false);
 
-    public S3Bridge(Iterable<Connector> connectors, File awsCredentialsConfigurationFile, AWSClientId clientId) {
+    public S3Bridge(Iterable<Connector> connectors, File awsCredentialsConfigurationFile, PlatformClientId clientId) {
         this.connectors = connectors;
         this.awsCredentialsConfigurationFile = awsCredentialsConfigurationFile;
         this.clientId = clientId;
@@ -71,13 +75,12 @@ public class S3Bridge {
             throw new IllegalStateException("Credentials file '" + this.awsCredentialsConfigurationFile.getPath() + "' does not exist");
         }
 
-        final AWSCredentialsConfig config;
         try {
-            config = JAXBUtils.unmarshal(AWSCredentialsConfig.class, this.awsCredentialsConfigurationFile);
+            credentialsConfig = JAXBUtils.unmarshal(PlatformCredentialsConfig.class, this.awsCredentialsConfigurationFile);
         } catch (Throwable t) {
             throw new IllegalStateException("Malformed file '" + this.awsCredentialsConfigurationFile.getPath() + "'", t);
         }
-        for (final AWSCredentialsConfig.Credentials credentials : config.getCredentials()) {
+        for (final PlatformCredentialsConfig.Credentials credentials : credentialsConfig.getCredentials()) {
             if (credentials.getId() == this.clientId) {
                 this.accessKey = credentials.getAccessKey();
                 this.secretKey = credentials.getSecretKey();
@@ -120,7 +123,29 @@ public class S3Bridge {
         s3.shutdown();
 
         for (final Connector connector : connectors) {
-            if (!connector.begin()) {
+            final PlatformCredentialsConfig.Credentials credentials;
+            if (connector.getPlatformId().isPresent()) {
+                PlatformCredentialsConfig.Credentials candidate = null;
+                for (final PlatformCredentialsConfig.Credentials configuredCredentials : this.credentialsConfig.getCredentials()) {
+                    if (configuredCredentials.getId() == connector.getPlatformId().get()) {
+                        candidate = configuredCredentials;
+                    }
+                }
+                if (candidate == null) {
+                    logger.error("No credentials found for connector '"
+                            + connector.getClass().getSimpleName()
+                            + "' with service '"
+                            + connector.getPlatformId().get()
+                            + "' in file '"
+                            + this.awsCredentialsConfigurationFile.getPath()
+                            + "'");
+                    return false;
+                }
+                credentials = candidate;
+            } else {
+                credentials = null;
+            }
+            if (!connector.begin(credentials)) {
                 logger.error("Failed to begin connector '" + connector.getClass().getSimpleName() + "'");
             } else {
                 logger.info("Begin of connector '" + connector.getClass().getSimpleName() + "'");
@@ -232,7 +257,11 @@ public class S3Bridge {
 
         PropertyConfigurator.configure(logConfig);
         try {
-            if (!new S3Bridge(ImmutableList.<Connector>of(new SpreadSheetConverter()), new File(args[0]), AWSClientId.S3Bridge).sync()) {
+/*            if (!new S3Bridge(ImmutableList.<Connector>of(new SpreadSheetConverter()), new File(args[0]), PlatformClientId.S3Bridge).sync()) {
+                logger.warn("Synchronization process returned any data synchronized");
+                System.exit(4);
+            }*/
+            if (!new S3Bridge(ImmutableList.<Connector>of(new BigQueryConnector()), new File(args[0]), PlatformClientId.S3Bridge).sync()) {
                 logger.warn("Synchronization process returned any data synchronized");
                 System.exit(4);
             }

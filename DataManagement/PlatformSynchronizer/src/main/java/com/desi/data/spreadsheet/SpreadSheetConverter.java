@@ -1,10 +1,8 @@
 package com.desi.data.spreadsheet;
 
-import com.desi.data.AggregatedSensorRecord;
-import com.desi.data.Connector;
-import com.desi.data.SensorNameProvider;
-import com.desi.data.SensorRecord;
+import com.desi.data.*;
 import com.desi.data.bean.DefaultAggregatedSensorRecord;
+import com.desi.data.config.PlatformCredentialsConfig;
 import com.google.common.base.Optional;
 import com.google.common.collect.*;
 import org.apache.commons.io.IOUtils;
@@ -109,7 +107,12 @@ public class SpreadSheetConverter implements Connector {
         return new Double(new DecimalFormat("#.##").format(count / Iterables.size(records))).floatValue();
     }
 
-    public boolean begin() {
+    @Override
+    public Optional<PlatformClientId> getPlatformId() {
+        return Optional.absent();
+    }
+
+    public boolean begin(PlatformCredentialsConfig.Credentials credentials) {
         return true;
     }
 
@@ -163,17 +166,18 @@ public class SpreadSheetConverter implements Connector {
             for (final String uuid : sensorDisplayNames.keySet()) {
 
                 final float value = record.getSensorValue(uuid);
-                final float valueVariation;
+/*                final float valueVariation;
                 if (value != 0) {
                     valueVariation = value - minValues.get(uuid);
                 } else {
                     valueVariation = 0;
                 }
-//                csvOut.append(",\"").append(formatFloat(value)).append("\",\"").append(formatFloat(valueVariation)).append("\"");
-
+                csvOut.append(",\"").append(formatFloat(value)).append("\",\"").append(formatFloat(valueVariation)).append("\"");
+*/
                 final JSONObject jsonRecordValue = new JSONObject();
                 jsonRecordValue.put("UUID", uuid);
                 jsonRecordValue.put("Value", formatFloat(value));
+                jsonRecordValue.put("HasValue", record.hasSensorValue(uuid));
                 jsonRecordsValues.put(jsonRecordValue);
             }
             jsonSensorsRecords.put("Sensors", jsonRecordsValues);

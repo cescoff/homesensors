@@ -4,18 +4,23 @@
 #include <DallasTemperature.h>
 #include <Wire.h> 
 
-#define ONE_WIRE_BUS 5
+#define ONE_WIRE_BUS1 5
+#define ONE_WIRE_BUS2 6
 
 
 // Create Amplitude Shift Keying Object
 RH_ASK rf_driver;
 
-OneWire oneWire(ONE_WIRE_BUS);
-DallasTemperature sensors(&oneWire);
-float celcius=0;
+OneWire oneWire1(ONE_WIRE_BUS1);
+OneWire oneWire2(ONE_WIRE_BUS2);
+DallasTemperature heaterSensors(&oneWire1);
+DallasTemperature heatingSensors(&oneWire2);
+float heaterCelcius=0;
+float heatingCelcius=0;
 
 
-const char* LOCAL_SENSOR_UUID = "eef014ca-4261-40a8-aecd-ec41e466e5d0";
+const char* HEATER_SENSOR_UUID = "c4944883-1151-4263-9e7b-965e285e212c";
+const char* HEATING_SENSOR_UUID = "5f7cee1f-2e74-48b4-a53a-9be4bbe0abec";
 
 unsigned long lastPingMillis = 0;
 
@@ -27,45 +32,40 @@ void setup() {
 
     // Initialize ASK Object
   rf_driver.init();
-  sensors.begin();
+  heaterSensors.begin();
+  heatingSensors.begin();
+  delay(2000);
 }
 
 
 void loop() {
-  if (lastPingMillis == 0) {
+/*  if (lastPingMillis == 0) {
     lastPingMillis = millis();
-  }
+  }*/
   if ((millis() - lastPingMillis) >= 60000) {
-    sensors.requestTemperatures(); 
-    celcius=sensors.getTempCByIndex(0);    
-    char string[150];
-    sprintf(string, "%s;C=%f", LOCAL_SENSOR_UUID, celcius);
-    Serial.println(string);
-    rf_driver.send((uint8_t *)string, strlen(string));
-    rf_driver.waitPacketSent();
+    heaterSensors.requestTemperatures(); 
+    heaterCelcius=heaterSensors.getTempCByIndex(0);    
+    sendTemperature(heaterCelcius, HEATER_SENSOR_UUID);
+
+    
+    heatingSensors.requestTemperatures(); 
+    heatingCelcius=heatingSensors.getTempCByIndex(0);    
+    sendTemperature(heatingCelcius, HEATING_SENSOR_UUID);
+    
     lastPingMillis = millis();
   }
 }
 
-/*
-  SerialEvent occurs whenever a new data comes in the hardware serial RX. This
-  routine is run between each time loop() runs, so using delay inside loop can
-  delay response. Multiple bytes of data may be available.
-*/
-void serialEvent() {
-  while (Serial.available()) {
-    // get the new byte:
-    char inChar = (char)Serial.read();
-    // add it to the inputString:
-    inputString += inChar;
-    // if the incoming character is a newline, set a flag so the main loop can
-    // do something about it:
-    if (inChar == '\n') {
-        if (inputString.indexOf("MSG://") >= 0) {
-          Serial.println(inputString);
-          rf_driver.send((uint8_t *)string, strlen(string));
-          rf_driver.waitPacketSent();
-        }
-    }
-  }
+void sendTemperature(float temp, const char* sensorId) {
+  char str_temp[6];
+  dtostrf(temp, 4, 2, str_temp);
+  char string[96];
+  Serial.print(sensorId);
+  Serial.print("=");
+  Serial.print(temp);
+  Serial.println("C");
+  sprintf(string, "FWD://%s;C=%s", sensorId, str_temp);
+  Serial.println(string);
+  rf_driver.send((uint8_t *)string, strlen(string));
+  rf_driver.waitPacketSent();
 }

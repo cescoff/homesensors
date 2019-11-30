@@ -57,6 +57,7 @@ public class BigQueryConnector implements Connector {
 
     private static final String GET_SENSOR_IDS_QUERY = "SELECT SensorId FROM Records.SensorNames";
 
+
     private BigQuery bigQuery;
 
 

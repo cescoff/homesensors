@@ -3,12 +3,14 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Wire.h> 
+#include <SoftwareSerial.h>
 
 #define ONE_WIRE_BUS 5
 
 // Create Amplitude Shift Keying Object
 RH_ASK rf_driver;
 
+SoftwareSerial mySerial(2, 3); // RX, TX
 OneWire oneWire(ONE_WIRE_BUS);
 DallasTemperature sensors(&oneWire);
 float celcius=0;
@@ -26,6 +28,9 @@ void setup() {
     // Initialize ASK Object
   rf_driver.init();
   sensors.begin();
+
+  mySerial.begin(9600);
+  mySerial.println("Hello, world?");
 }
 
 
@@ -46,29 +51,32 @@ void loop() {
     rf_driver.waitPacketSent();
     lastPingMillis = millis();
   }
-  recieveRadio();
+  
 }
 
-void recieveRadio() {
-    uint8_t buf[50];
-    uint8_t buflen = sizeof(buf);
-    // Check if received packet is correct size
-    if (rf_driver.recv(buf, &buflen)) {
-      // Message received with valid checksum
-      String rewrittenMessage = (char *) buf;
-      if (rewrittenMessage.indexOf("FWD://") >= 0) {
-        rewrittenMessage = rewrittenMessage.substring(6,rewrittenMessage.length());
-        Serial.print("Forwarding message : '");
-        Serial.print(rewrittenMessage);
-        Serial.println("'");
-
-        char string[150];
-        rewrittenMessage.toCharArray(string,64);
-        rf_driver.send((uint8_t *)string, strlen(string));
-
-        rf_driver.waitPacketSent();
-      }
+void readSoftwareSerial() {
+  while (mySerial.available()) {
+    // get the new byte:
+    char inChar = (char)mySerial.read();
+    // add it to the inputString:
+    inputString += inChar;
+    // if the incoming character is a newline, set a flag so the main loop can
+    // do something about it:
+    if (inChar == '\n') {
+        if (inputString.indexOf("MSG://") >= 0) {
+          inputString = inputString.substring(6,inputString.length() - 1);
+          Serial.print("Forwarding message to radio '");
+          Serial.print(inputString);
+          Serial.println("'");
+          
+          char string[150];
+          inputString.toCharArray(string,64);
+          rf_driver.send((uint8_t *)string, strlen(string));
+          rf_driver.waitPacketSent();
+        }
+        inputString="";
     }
+  }
 }
 
 /*
@@ -94,7 +102,6 @@ void serialEvent() {
           char string[150];
           inputString.toCharArray(string,64);
           rf_driver.send((uint8_t *)string, strlen(string));
-
           rf_driver.waitPacketSent();
         }
         inputString="";

@@ -109,12 +109,14 @@ public class BigQueryConnector implements Connector {
             final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(rawDataTableId);
 
             for (final SensorRecord record : page) {
-                insertAllRequest.addRow(ImmutableMap.<String, String>builder().
-                        put("SensorId", record.getSensorUUID()).
-                        put("DateTime", record.getDateTaken().toString()).
-                        put("Date", record.getDateTaken().getYear() + "-" + record.getDateTaken().getMonthOfYear() + "-" + record.getDateTaken().getDayOfMonth()).
-                        put("Time", record.getDateTaken().getHourOfDay() + ":" + record.getDateTaken().getMinuteOfHour() + ":" + record.getDateTaken().getSecondOfMinute()).
-                        put("Value", formatFloat(record.getValue())).build());
+                if (record.getValue() != 0) {
+                    insertAllRequest.addRow(ImmutableMap.<String, String>builder().
+                            put("SensorId", record.getSensorUUID()).
+                            put("DateTime", record.getDateTaken().toString()).
+                            put("Date", record.getDateTaken().getYear() + "-" + record.getDateTaken().getMonthOfYear() + "-" + record.getDateTaken().getDayOfMonth()).
+                            put("Time", record.getDateTaken().getHourOfDay() + ":" + record.getDateTaken().getMinuteOfHour() + ":" + record.getDateTaken().getSecondOfMinute()).
+                            put("Value", formatFloat(record.getValue())).build());
+                }
             }
 
             final InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest.build());

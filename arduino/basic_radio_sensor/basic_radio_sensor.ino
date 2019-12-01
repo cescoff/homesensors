@@ -42,7 +42,7 @@ void loop() {
 /*  if (lastPingMillis == 0) {
     lastPingMillis = millis();
   }*/
-  if ((millis() - lastPingMillis) >= 60000) {
+  if ((millis() - lastPingMillis) >= 50000) {
     heaterSensors.requestTemperatures(); 
     heaterCelcius=heaterSensors.getTempCByIndex(0);    
     sendTemperature(heaterCelcius, HEATER_SENSOR_UUID);

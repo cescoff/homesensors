@@ -9,6 +9,7 @@ import com.desi.data.utils.JAXBUtils;
 import com.google.common.base.Optional;
 import org.joda.time.LocalDateTime;
 
+import java.io.File;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 public class ZohoConnector implements Connector {
@@ -55,7 +56,7 @@ public class ZohoConnector implements Connector {
     }
 
     @Override
-    public boolean begin(PlatformCredentialsConfig.Credentials credentials) {
+    public boolean begin(PlatformCredentialsConfig.Credentials credentials, final File configDir) {
         init();
         return false;
     }

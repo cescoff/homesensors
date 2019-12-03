@@ -112,7 +112,7 @@ public class SpreadSheetConverter implements Connector {
         return Optional.absent();
     }
 
-    public boolean begin(PlatformCredentialsConfig.Credentials credentials) {
+    public boolean begin(PlatformCredentialsConfig.Credentials credentials, File configDir) {
         return true;
     }
 

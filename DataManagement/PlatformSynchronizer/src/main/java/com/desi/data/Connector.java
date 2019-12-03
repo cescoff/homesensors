@@ -10,7 +10,7 @@ public interface Connector {
 
     public Optional<PlatformClientId> getPlatformId();
 
-    public boolean begin(PlatformCredentialsConfig.Credentials credentials);
+    public boolean begin(PlatformCredentialsConfig.Credentials credentials, final File configDir);
 
     public boolean addRecords(final Iterable<SensorRecord> records, final SensorNameProvider nameProvider) throws Exception;
 

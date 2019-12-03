@@ -26,7 +26,7 @@ public class ZohoFileConnector implements Connector {
 
 
     @Override
-    public boolean begin(PlatformCredentialsConfig.Credentials credentials) {
+    public boolean begin(PlatformCredentialsConfig.Credentials credentials, final File configDir) {
         return true;
     }
 

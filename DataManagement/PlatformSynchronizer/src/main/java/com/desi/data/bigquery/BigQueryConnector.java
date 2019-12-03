@@ -67,14 +67,14 @@ public class BigQueryConnector implements Connector {
     }
 
     @Override
-    public boolean begin(final PlatformCredentialsConfig.Credentials credentials) {
+    public boolean begin(final PlatformCredentialsConfig.Credentials credentials, final File configDir) {
         if (this.bigQuery != null) {
             return true;
         }
         if (StringUtils.isEmpty(credentials.getKeyFilePath())) {
             throw new IllegalStateException("Cannot use BigQuery connector with key configuration file path configured");
         }
-        final File keyFile = new File(credentials.getKeyFilePath());
+        final File keyFile = credentials.getKeyFile(configDir);
         if (!keyFile.exists()) {
             throw new IllegalStateException("BigQuery key file '" + keyFile.getPath() + "' does not exist");
         }

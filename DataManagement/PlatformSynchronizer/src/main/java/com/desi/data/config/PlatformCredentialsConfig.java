@@ -6,6 +6,7 @@ import com.google.common.collect.Lists;
 
 import javax.xml.bind.JAXBException;
 import javax.xml.bind.annotation.*;
+import java.io.File;
 import java.util.List;
 
 @XmlRootElement(name = "platform-credentials")
@@ -58,6 +59,17 @@ public class PlatformCredentialsConfig {
         }
 
         public String getKeyFilePath() { return keyFilePath; }
+
+        public File getKeyFile(final File configDir) {
+            final File configured = new File(this.keyFilePath);
+            if (configured.exists()) {
+                return configured;
+            }
+            if (configDir.isDirectory()) {
+                return new File(configDir, keyFilePath);
+            }
+            throw new IllegalStateException("Config dir '" + configDir.getPath() + "' is not a directory and file '" + this.keyFilePath + "' does not exist");
+        }
 
         public PlatformClientId getId() {
             return id;

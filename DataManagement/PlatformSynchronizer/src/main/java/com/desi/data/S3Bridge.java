@@ -15,6 +15,7 @@ import com.desi.data.impl.StaticSensorNameProvider;
 import com.desi.data.spreadsheet.SpreadSheetConverter;
 import com.desi.data.utils.JAXBUtils;
 import com.desi.data.zoho.ZohoFileConnector;
+import com.google.auth.oauth2.GoogleCredentials;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
 import com.google.common.collect.ImmutableList;
@@ -145,7 +146,7 @@ public class S3Bridge {
             } else {
                 credentials = null;
             }
-            if (!connector.begin(credentials)) {
+            if (!connector.begin(credentials, awsCredentialsConfigurationFile.getParentFile())) {
                 logger.error("Failed to begin connector '" + connector.getClass().getSimpleName() + "'");
             } else {
                 logger.info("Begin of connector '" + connector.getClass().getSimpleName() + "'");

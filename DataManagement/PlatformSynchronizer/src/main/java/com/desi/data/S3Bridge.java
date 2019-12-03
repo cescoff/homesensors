@@ -261,7 +261,7 @@ public class S3Bridge {
                 logger.warn("Synchronization process returned any data synchronized");
                 System.exit(4);
             }*/
-            if (!new S3Bridge(ImmutableList.<Connector>of(new BigQueryConnector()), new File(args[0]), PlatformClientId.S3Bridge).sync()) {
+            if (!new S3Bridge(ImmutableList.<Connector>of(new BigQueryConnector(), new SpreadSheetConverter()), new File(args[0]), PlatformClientId.S3Bridge).sync()) {
                 logger.warn("Synchronization process returned any data synchronized");
                 System.exit(4);
             }

@@ -109,7 +109,8 @@ public class BigQueryConnector implements Connector {
 
 
 
-        for (final Iterable<SensorRecord> page : Iterables.partition(Iterables.filter(records, incrementalFilter(records)), 10000)) {
+//        for (final Iterable<SensorRecord> page : Iterables.partition(Iterables.filter(records, incrementalFilter(records)), 10000)) {
+        for (final Iterable<SensorRecord> page : Iterables.partition(records, 10000)) {
             final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(rawDataTableId);
 
             for (final SensorRecord record : page) {
@@ -174,7 +175,7 @@ public class BigQueryConnector implements Connector {
         return true;
     }
 
-    private Predicate<SensorRecord> incrementalFilter(final Iterable<SensorRecord> records) {
+/*    private Predicate<SensorRecord> incrementalFilter(final Iterable<SensorRecord> records) {
         final Map<String, LocalDateTime> rawCheckPoints = Maps.newHashMap();
         for (final SensorRecord record : records) {
             if (!rawCheckPoints.containsKey(record.getSensorUUID())) {
@@ -193,7 +194,7 @@ public class BigQueryConnector implements Connector {
                         || sensorRecord.getDateTaken().isAfter(rawCheckPoints.get(sensorRecord.getSensorUUID()));
             }
         };
-    }
+    }*/
 
     private Iterable<AggregatedSensorRecord> getAggregatedValues(final String sensorId, final AggregationScope scope) {
         final List<AggregatedSensorRecord> result = Lists.newArrayList();
@@ -269,7 +270,7 @@ public class BigQueryConnector implements Connector {
                     logger.debug("Got attribute '" + val.toString() + "'");
                     if (!val.isNull()) {
                         logger.info("Checkpoint value for sensor '" + sensorId + "' is '" + val.getStringValue() + "'");
-                        return new LocalDateTime(val.getStringValue());
+                        return new LocalDateTime(val.getStringValue()).minusMinutes(50);
                     }
                 }
             }
@@ -306,7 +307,7 @@ public class BigQueryConnector implements Connector {
         return df.format(new Float(value).doubleValue());
     }
 
-    public Optional<LocalDateTime> getRawPointValue(String sensorId) {
+    public Optional<LocalDateTime> getRawCheckpointValue(String sensorId) {
         final String query = StringUtils.replace(GET_CHECKPOINT_QUERY, SENSOR_ID_QUERY_PARAMETER, sensorId);
         logger.debug("Running query '" + query + "'");
         final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
@@ -330,11 +331,7 @@ public class BigQueryConnector implements Connector {
 
     @Override
     public Optional<LocalDateTime> getCheckPointValue(String sensorId) {
-        final Optional<LocalDateTime> rawCheckPoint = getRawPointValue(sensorId);
-        if (!rawCheckPoint.isPresent()) {
-            return rawCheckPoint;
-        }
-        return Optional.of(rawCheckPoint.get().minusMinutes(MINUTES_BACK_TO_THE_PAST));
+        return getRawCheckpointValue(sensorId);
     }
 
     @Override

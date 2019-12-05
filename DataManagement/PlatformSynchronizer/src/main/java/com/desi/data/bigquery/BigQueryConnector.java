@@ -17,6 +17,7 @@ import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import org.apache.commons.lang.StringUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
+import org.javatuples.Pair;
 import org.joda.time.LocalDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -175,13 +176,14 @@ public class BigQueryConnector implements Connector {
         final LocalDateTime checkPoint = getAggregatedCheckPoint(sensorId, scope);
         final LocalDateTime now = LocalDateTime.now();
 
-        LocalDateTime windowStart = checkPoint;
-        LocalDateTime windowEnd = scope.nextValue(windowStart);
+//        LocalDateTime windowStart = checkPoint;
+//        LocalDateTime windowEnd = scope.nextValue(windowStart);
 
-        while (!scope.isEndOfWindow(windowEnd)) {
-            result.add(new DefaultAggregatedSensorRecord(windowStart, windowEnd, new StaticSensorNameProvider()));
-            windowStart = windowEnd;
-            windowEnd = scope.nextValue(windowEnd);
+        Pair<LocalDateTime, LocalDateTime> window = Pair.with(scope.getStartDateTime(checkPoint), scope.nextValue(checkPoint));
+
+        while (!scope.isEndOfWindow(window.getValue1())) {
+            result.add(new DefaultAggregatedSensorRecord(window.getValue0(), window.getValue1(), new StaticSensorNameProvider()));
+            window = scope.getNextPeriod(window.getValue1());
         }
 
         for (final SensorRecord record : getRawDataForAggregation(sensorId, checkPoint)) {
@@ -293,7 +295,7 @@ public class BigQueryConnector implements Connector {
                     logger.debug("Got attribute '" + val.toString() + "'");
                     if (!val.isNull()) {
                         logger.info("Checkpoint value for sensor '" + sensorId + "' is '" + val.getStringValue() + "'");
-                        return Optional.of(new LocalDateTime(val.getStringValue()));
+                        return Optional.of(new LocalDateTime(val.getStringValue()).minusMinutes(30));
                     }
                 }
             }

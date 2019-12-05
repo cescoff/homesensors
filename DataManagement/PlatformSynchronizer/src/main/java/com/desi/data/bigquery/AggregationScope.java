@@ -40,7 +40,7 @@ public enum AggregationScope {
     }
 
     public LocalDateTime previousValue(final LocalDateTime current) {
-        if (id == 1) {
+        if (id == 1 || id == 4) {
             return current.minusMinutes(current.getMinuteOfHour() % 10);
         } else if (id == 2) {
             return current.minusHours(1).withMinuteOfHour(0).withSecondOfMinute(0).withMillisOfSecond(0);

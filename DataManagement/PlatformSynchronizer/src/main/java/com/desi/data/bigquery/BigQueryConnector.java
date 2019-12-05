@@ -11,10 +11,7 @@ import com.google.cloud.bigquery.*;
 import com.google.common.base.Function;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
+import com.google.common.collect.*;
 import org.apache.commons.lang.StringUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.javatuples.Pair;
@@ -22,6 +19,7 @@ import org.joda.time.LocalDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
+import javax.swing.text.html.Option;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -29,6 +27,7 @@ import java.io.IOException;
 import java.text.DecimalFormat;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 public class BigQueryConnector implements Connector {
 
@@ -58,6 +57,8 @@ public class BigQueryConnector implements Connector {
 
     private static final String GET_SENSOR_IDS_QUERY = "SELECT SensorId FROM Records.SensorNames";
 
+    // Used to calculate average during the last 30 minutes for heating thresholding
+    private static final int MINUTES_BACK_TO_THE_PAST = 50;
 
     private BigQuery bigQuery;
 
@@ -106,7 +107,9 @@ public class BigQueryConnector implements Connector {
 
         int addedVakues = Iterables.size(records);
 
-        for (final Iterable<SensorRecord> page : Iterables.partition(records, 10000)) {
+
+
+        for (final Iterable<SensorRecord> page : Iterables.partition(Iterables.filter(records, incrementalFilter(records)), 10000)) {
             final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(rawDataTableId);
 
             for (final SensorRecord record : page) {
@@ -169,6 +172,27 @@ public class BigQueryConnector implements Connector {
         }
 
         return true;
+    }
+
+    private Predicate<SensorRecord> incrementalFilter(final Iterable<SensorRecord> records) {
+        final Map<String, LocalDateTime> rawCheckPoints = Maps.newHashMap();
+        for (final SensorRecord record : records) {
+            if (!rawCheckPoints.containsKey(record.getSensorUUID())) {
+                final Optional<LocalDateTime> checkPoint = getRawPointValue(record.getSensorUUID());
+                if (checkPoint.isPresent()) {
+                    rawCheckPoints.put(record.getSensorUUID(), checkPoint.get());
+                } else {
+                    rawCheckPoints.put(record.getSensorUUID(), LocalDateTime.parse("2019-11-5T00:00:00"));
+                }
+            }
+        }
+        return new Predicate<SensorRecord>() {
+            @Override
+            public boolean apply(@Nullable SensorRecord sensorRecord) {
+                return sensorRecord.getDateTaken().isEqual(rawCheckPoints.get(sensorRecord.getSensorUUID()))
+                        || sensorRecord.getDateTaken().isAfter(rawCheckPoints.get(sensorRecord.getSensorUUID()));
+            }
+        };
     }
 
     private Iterable<AggregatedSensorRecord> getAggregatedValues(final String sensorId, final AggregationScope scope) {
@@ -282,8 +306,7 @@ public class BigQueryConnector implements Connector {
         return df.format(new Float(value).doubleValue());
     }
 
-    @Override
-    public Optional<LocalDateTime> getCheckPointValue(String sensorId) {
+    public Optional<LocalDateTime> getRawPointValue(String sensorId) {
         final String query = StringUtils.replace(GET_CHECKPOINT_QUERY, SENSOR_ID_QUERY_PARAMETER, sensorId);
         logger.debug("Running query '" + query + "'");
         final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
@@ -295,7 +318,7 @@ public class BigQueryConnector implements Connector {
                     logger.debug("Got attribute '" + val.toString() + "'");
                     if (!val.isNull()) {
                         logger.info("Checkpoint value for sensor '" + sensorId + "' is '" + val.getStringValue() + "'");
-                        return Optional.of(new LocalDateTime(val.getStringValue()).minusMinutes(30));
+                        return Optional.of(new LocalDateTime(val.getStringValue()));
                     }
                 }
             }
@@ -303,6 +326,15 @@ public class BigQueryConnector implements Connector {
             throw new IllegalStateException("Failed to run query '" + query + "'", e);
         }
         return Optional.absent();
+    }
+
+    @Override
+    public Optional<LocalDateTime> getCheckPointValue(String sensorId) {
+        final Optional<LocalDateTime> rawCheckPoint = getRawPointValue(sensorId);
+        if (!rawCheckPoint.isPresent()) {
+            return rawCheckPoint;
+        }
+        return Optional.of(rawCheckPoint.get().minusMinutes(MINUTES_BACK_TO_THE_PAST));
     }
 
     @Override

@@ -144,7 +144,8 @@ public class BigQueryConnector implements Connector {
         for (final String sensorId : getAllSensorIds()) {
             for (final AggregationScope scope : AggregationScope.values()) {
                 logger.info("Performing '" + scope.name() + "' aggregation for sensor '" + sensorId + "'");
-                final Iterable<AggregatedSensorRecord> aggregatedSensorRecords = getAggregatedValues(sensorId, scope);logger.info("Found " + Iterables.size(aggregatedSensorRecords) + " aggregated records for sensor '" + sensorId + "' on scope '" + scope.name() + "'");
+                final Iterable<AggregatedSensorRecord> aggregatedSensorRecords = getAggregatedValues(sensorId, scope);
+                logger.info("Found " + Iterables.size(aggregatedSensorRecords) + " aggregated records for sensor '" + sensorId + "' on scope '" + scope.name() + "'");
 
                 for (final Iterable<AggregatedSensorRecord> page : Iterables.partition(aggregatedSensorRecords, 10000)) {
                     final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(aggregatedDataTableId);
@@ -215,7 +216,7 @@ public class BigQueryConnector implements Connector {
             return Collections.emptyList();
         }
 
-        for (final SensorRecord record : getRawDataForAggregation(sensorId, checkPoint)) {
+        for (final SensorRecord record : getRawDataForAggregation(sensorId, checkPoint.minusMinutes(MINUTES_BACK_TO_THE_PAST))) {
             for (final AggregatedSensorRecord aggregatedSensorRecord : result) {
                 if (aggregatedSensorRecord.addValue(record)) {
                     break;

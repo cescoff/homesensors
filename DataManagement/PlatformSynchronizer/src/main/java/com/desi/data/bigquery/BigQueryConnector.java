@@ -25,6 +25,7 @@ import java.io.FileInputStream;
 import java.io.FileNotFoundException;
 import java.io.IOException;
 import java.text.DecimalFormat;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -143,8 +144,7 @@ public class BigQueryConnector implements Connector {
         for (final String sensorId : getAllSensorIds()) {
             for (final AggregationScope scope : AggregationScope.values()) {
                 logger.info("Performing '" + scope.name() + "' aggregation for sensor '" + sensorId + "'");
-                final Iterable<AggregatedSensorRecord> aggregatedSensorRecords = getAggregatedValues(sensorId, scope);
-                logger.info("Found " + Iterables.size(aggregatedSensorRecords) + " aggregated records for sensor '" + sensorId + "' on scope '" + scope.name() + "'");
+                final Iterable<AggregatedSensorRecord> aggregatedSensorRecords = getAggregatedValues(sensorId, scope);logger.info("Found " + Iterables.size(aggregatedSensorRecords) + " aggregated records for sensor '" + sensorId + "' on scope '" + scope.name() + "'");
 
                 for (final Iterable<AggregatedSensorRecord> page : Iterables.partition(aggregatedSensorRecords, 10000)) {
                     final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(aggregatedDataTableId);
@@ -211,6 +211,10 @@ public class BigQueryConnector implements Connector {
             window = scope.getNextPeriod(window.getValue1());
         }
 
+        if (result.size() <= 0) {
+            return Collections.emptyList();
+        }
+
         for (final SensorRecord record : getRawDataForAggregation(sensorId, checkPoint)) {
             for (final AggregatedSensorRecord aggregatedSensorRecord : result) {
                 if (aggregatedSensorRecord.addValue(record)) {
@@ -270,7 +274,7 @@ public class BigQueryConnector implements Connector {
                     logger.debug("Got attribute '" + val.toString() + "'");
                     if (!val.isNull()) {
                         logger.info("Checkpoint value for sensor '" + sensorId + "' is '" + val.getStringValue() + "'");
-                        return new LocalDateTime(val.getStringValue()).minusMinutes(50);
+                        return new LocalDateTime(val.getStringValue());
                     }
                 }
             }

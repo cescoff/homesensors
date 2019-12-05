@@ -25,7 +25,7 @@ public enum AggregationScope {
         if (id != 4) {
             return checkpointValue;
         }
-        return checkpointValue.minusMinutes(50);
+        return checkpointValue.minusMinutes(30);
     }
 
     public LocalDateTime nextValue(final LocalDateTime previous) {

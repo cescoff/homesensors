@@ -27,6 +27,7 @@ const char* HEATER_SENSOR_UUID = "c4944883-1151-4263-9e7b-965e285e212c";
 const char* HEATING_SENSOR_UUID = "5f7cee1f-2e74-48b4-a53a-9be4bbe0abec";
 
 unsigned long lastPingMillis = 0;
+unsigned long lastSerialValueMillis = 0;
 
 String inputString = "";         // a String to hold incoming data
 bool stringComplete = false;  // whether the string is complete
@@ -49,11 +50,12 @@ void loop() {
   if (lastPingMillis == 0) {
     lastPingMillis = millis();
   }
-  if ((millis() - lastPingMillis) >= 30000) {
-    if (updated) {
+  if ((millis() - lastPingMillis) >= 15000) {
+    if ((millis() - lastSerialValueMillis) < 240000) {
           rf_driver.send((uint8_t *)serialMessage, strlen(serialMessage));
           rf_driver.waitPacketSent();
-          updated = false;
+//          updated = false;
+          delay(1000);
     }
 
     char string[150];
@@ -71,23 +73,26 @@ void loop() {
     dtostrf(bathroomCelcius, 4, 2, str_temp);
 
     sprintf(string, "%s;C=%s", BATHROOM_SENSOR_UUID, str_temp);
-    Serial.println(string);
     rf_driver.send((uint8_t *)string, strlen(string));
     rf_driver.waitPacketSent();
+    Serial.println(string);
+    delay(1000);
 
     dtostrf(heaterCelcius, 4, 2, str_temp);
 
     sprintf(string, "%s;C=%s", HEATER_SENSOR_UUID, str_temp);
-    Serial.println(string);
     rf_driver.send((uint8_t *)string, strlen(string));
     rf_driver.waitPacketSent();
+    Serial.println(string);
+    delay(1000);
 
     dtostrf(heatingCelcius, 4, 2, str_temp);
 
     sprintf(string, "%s;C=%s", HEATING_SENSOR_UUID, str_temp);
-    Serial.println(string);
     rf_driver.send((uint8_t *)string, strlen(string));
     rf_driver.waitPacketSent();
+    Serial.println(string);
+    delay(1000);
 
     lastPingMillis = millis();
   }
@@ -115,7 +120,8 @@ void serialEvent() {
           Serial.println("'");
           
           inputString.toCharArray(serialMessage,64);
-          updated = true;
+          //updated = true;
+          lastSerialValueMillis = millis();
         }
         inputString="";
     }

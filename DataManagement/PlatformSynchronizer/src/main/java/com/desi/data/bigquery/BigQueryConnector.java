@@ -2,9 +2,11 @@ package com.desi.data.bigquery;
 
 import com.desi.data.*;
 import com.desi.data.bean.DefaultAggregatedSensorRecord;
+import com.desi.data.bean.DefaultHeatingLevelRecord;
 import com.desi.data.bean.TemperatureRecord;
 import com.desi.data.config.PlatformCredentialsConfig;
 import com.desi.data.impl.StaticSensorNameProvider;
+import com.desi.data.utils.HeatingLevelHelper;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.bigquery.*;
@@ -34,11 +36,15 @@ public class BigQueryConnector implements Connector {
 
     private static final Logger logger = LoggerFactory.getLogger(BigQueryConnector.class);
 
+    private static final LocalDateTime DEFAULT_CHECKPOINT_VALUE = LocalDateTime.parse("2019-11-4T00:00:00");
+
     private static final String DATASET_NAME = "Records";
 
     private static final String SENSOR_RECORDS_TABLE_NAME = "SensorData";
 
     private static final String AGGREGATED_SENSOR_RECORDS_TABLE_NAME = "SensorDataAggregated";
+
+    private static final String HEATING_LEVEL_TABLE_NAME = "HeatingLevel";
 
     private static final String SENSOR_ID_QUERY_PARAMETER = "${SENSOR_ID}";
 
@@ -50,13 +56,17 @@ public class BigQueryConnector implements Connector {
 
     private static final String CHECKPOINT_ATTRIBUTE_NAME = "checkpoint";
 
-    private static final String GET_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM Records.SensorData records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
+    private static final String GET_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME + ".SensorData records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
 
-    private static final String GET_AGGREGATED_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM Records.SensorDataAggregated records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND AggregationScope=" + AGGREGATION_SCOPE_PARAMETER;
+    private static final String GET_AGGREGATED_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME + ".SensorDataAggregated records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND AggregationScope=" + AGGREGATION_SCOPE_PARAMETER;
 
-    private static final String GET_SENSOR_RAW_DATA_QUERY = "SELECT DateTime, Value FROM Records.SensorData WHERE SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND DateTime>\"" + DATETIME_QUERY_PARAMETER + "\"";
+    private static final String GET_SENSOR_RAW_DATA_QUERY = "SELECT DateTime, Value FROM " + DATASET_NAME + ".SensorData WHERE SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND DateTime>\"" + DATETIME_QUERY_PARAMETER + "\"";
 
-    private static final String GET_SENSOR_IDS_QUERY = "SELECT SensorId FROM Records.SensorNames";
+    private static final String GET_SENSOR_IDS_QUERY = "SELECT SensorId FROM " + DATASET_NAME + ".SensorNames";
+
+    private static final String GET_HEATING_LEARNING_DATA = "SELECT DateTime, Value, SensorName, SensorId, Type, AggregationScope FROM " + DATASET_NAME + ".HeatingLearningData  WHERE DateTime >= \"" + DATETIME_QUERY_PARAMETER + "\"";
+
+    private static final String GET_HEATING_LEVEL_CHECKPOINT = "SELECT Max(DateTime) FROM " + DATASET_NAME + ".HeatingLevel";
 
     // Used to calculate average during the last 30 minutes for heating thresholding
     private static final int MINUTES_BACK_TO_THE_PAST = 50;
@@ -173,6 +183,33 @@ public class BigQueryConnector implements Connector {
             }
         }
 
+        final TableId heatingLevelTableId = bigQuery.getTable(DATASET_NAME, HEATING_LEVEL_TABLE_NAME).getTableId();
+        for (final Iterable<HeatingLevelRecord> heatingLevelRecords : Iterables.partition(getAggregatedHeatingLevelValues(), 10000)) {
+            final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(heatingLevelTableId);
+
+            for (final HeatingLevelRecord heatingLevelRecord : heatingLevelRecords) {
+                insertAllRequest.addRow(ImmutableMap.<String, String>builder().
+                        put("DateTime", heatingLevelRecord.getDateTime().toString()).
+                        put("HeatingLevel", formatFloat(heatingLevelRecord.getHeatingLevel())).
+                        put("IndoorMonitorValue", formatFloat(heatingLevelRecord.getIndoorMonitorValue())).
+                        put("OutdoorMonitorValue", formatFloat(heatingLevelRecord.getOutdoorMonitorValue())).
+                        put("HeatingMonitorValue", formatFloat(heatingLevelRecord.getHeatingMonitorValue())).
+                        put("PeriodType", heatingLevelRecord.getPerdiod().name()).build());
+            }
+
+            final InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest.build());
+            final Map<Long, List<BigQueryError>> errors = insertAllResponse.getInsertErrors();
+            if (errors != null && errors.size() > 0) {
+                for (final Long aLong : errors.keySet()) {
+                    for (final BigQueryError error : errors.get(aLong)) {
+                        logger.error("INSERT ERROR : '" + error.toString() + "'");
+                    }
+                }
+                return false;
+            }
+        }
+
+
         return true;
     }
 
@@ -196,6 +233,83 @@ public class BigQueryConnector implements Connector {
             }
         };
     }*/
+
+    private Iterable<HeatingLevelRecord> getAggregatedHeatingLevelValues() {
+        final LocalDateTime checkPointValue = getHeatingLevelCheckPoint();
+        final String query = StringUtils.replace(GET_HEATING_LEARNING_DATA, DATETIME_QUERY_PARAMETER, checkPointValue.toString());
+
+        final List<HeatingLevelRecord> result = Lists.newArrayList();
+
+        logger.info("Running query '" + query + "'");
+        final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
+        logger.debug("Iterating on query result '" + query + "'");
+        try {
+            for (FieldValueList row : bigQuery.query(queryConfig).iterateAll()) {
+                logger.debug("Got ROW");
+                // DateTime, Value, SensorName, SensorId, Type, AggregationScope
+                final LocalDateTime dateTime;
+                final float value;
+                final String sensorName;
+                final String sensorid;
+                final SensorType type;
+
+                if (!row.get(0).isNull()) {
+                    dateTime = LocalDateTime.parse(row.get(0).getStringValue());
+                } else {
+                    dateTime = null;
+                }
+                if (!row.get(1).isNull()) {
+                    value = new Double(row.get(1).getDoubleValue()).floatValue();
+                } else {
+                    value = -127;
+                }
+                if (!row.get(2).isNull()) {
+                    sensorName = row.get(2).getStringValue();
+                } else {
+                    sensorName = null;
+                }
+                if (!row.get(3).isNull()) {
+                    sensorid = row.get(3).getStringValue();
+                } else {
+                    sensorid = null;
+                }
+                if (!row.get(4).isNull()) {
+                    type = SensorType.valueOf(row.get(4).getStringValue());
+                } else {
+                    type = null;
+                }
+
+                addTo(result, dateTime, type, value);
+            }
+        } catch (InterruptedException e) {
+            throw new IllegalStateException("Failed to run query '" + query + "'", e);
+        }
+        return ImmutableList.copyOf(Iterables.filter(result, DefaultHeatingLevelRecord.ReadyFilter()));
+    }
+
+    private boolean addTo(final List<HeatingLevelRecord> result, final LocalDateTime dateTime, final SensorType type, final float value) {
+        if (type != SensorType.HEATING && type != SensorType.INDOOR && type != SensorType.OUTDOOR) {
+            return false;
+        }
+        for (final HeatingLevelRecord heatingLevelRecord : result) {
+            if (type == SensorType.HEATING) {
+                if (heatingLevelRecord.addHeating(dateTime, value)) {
+                    return true;
+                }
+            } else if (type == SensorType.INDOOR) {
+                if (heatingLevelRecord.addIndoor(dateTime, value)) {
+                    return true;
+                }
+            } else if (type == SensorType.OUTDOOR) {
+                if (heatingLevelRecord.addOutdoor(dateTime, value)) {
+                    return true;
+                }
+            }
+        }
+        final HeatingLevelRecord newValue = new DefaultHeatingLevelRecord(dateTime);
+        result.add(newValue);
+        return addTo(result, dateTime, type, value);
+    }
 
     private Iterable<AggregatedSensorRecord> getAggregatedValues(final String sensorId, final AggregationScope scope) {
         final List<AggregatedSensorRecord> result = Lists.newArrayList();
@@ -283,6 +397,28 @@ public class BigQueryConnector implements Connector {
             throw new IllegalStateException("Failed to run query '" + query + "'", e);
         }
         return new LocalDateTime("2019-11-04T00:00:00");
+    }
+
+    private LocalDateTime getHeatingLevelCheckPoint() {
+        final String query = GET_HEATING_LEVEL_CHECKPOINT;
+        logger.debug("Running query '" + query + "'");
+        final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
+        logger.debug("Iterating on query result '" + query + "'");
+        try {
+            for (FieldValueList row : bigQuery.query(queryConfig).iterateAll()) {
+                logger.debug("Got ROW");
+                for (FieldValue val : row) {
+                    logger.debug("Got attribute '" + val.toString() + "'");
+                    if (!val.isNull()) {
+                        logger.info("Heating level checkpoint value is '" + val.getStringValue() + "'");
+                        return new LocalDateTime(val.getStringValue());
+                    }
+                }
+            }
+        } catch (InterruptedException e) {
+            throw new IllegalStateException("Failed to run query '" + query + "'", e);
+        }
+        return DEFAULT_CHECKPOINT_VALUE;
     }
 
     private Iterable<String> getAllSensorIds() {

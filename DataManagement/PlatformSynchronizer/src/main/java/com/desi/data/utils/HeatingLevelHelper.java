@@ -1,4 +1,4 @@
-package com.desi.data.bigquery;
+package com.desi.data.utils;
 
 
 import org.joda.time.LocalDateTime;
@@ -6,11 +6,11 @@ import org.joda.time.LocalDateTime;
 public class HeatingLevelHelper {
 
 
-    private static final int LEVEL_1_MAX = 16;
-    private static final int LEVEL_1_MIN = 14;
+    private static final float LEVEL_1_MAX = 20.5f;
+    private static final int LEVEL_1_MIN = 18;
 
-    private static final int LEVEL_2_MAX = 24;
-    private static final int LEVEL_2_MIN = 22;
+    private static final int LEVEL_2_MAX = 25;
+    private static final int LEVEL_2_MIN = 21;
 
     private static final int LEVEL_3_MAX = 32;
     private static final int LEVEL_3_MIN = 30;

@@ -15,22 +15,19 @@ void loop() {
   if (!printed) {
     String messages[3];
 
-    messages[0] = encodeMessage(0, 12, 5, 19.6);
-    messages[1] = encodeMessage(6, 15, 8, 99.6);
-    messages[2] = encodeMessage(5, 27, 3, -18.2);
+    messages[0] = encodeMessage(0, 5, 19.6);
+    messages[1] = encodeMessage(18, 8, 99.6);
+    messages[2] = encodeMessage(27, 3, -18.2);
 
 
     for (int i = 0; i < 3; i++) {
-      int nodeId = decodeNodeId(messages[i]);
       int sensorId = decodeSensorId(messages[i]);
       int messageId = decodeMessageId(messages[i]);
       float value = decodeValue(messages[i]);
 
       Serial.print(messages[i]);
       Serial.print(" : ");
-      Serial.print("NodeId=");
-      Serial.print(nodeId);
-      Serial.print(", SensorId=");
+      Serial.print("SensorId=");
       Serial.print(sensorId);
       Serial.print(", MessageId=");
       Serial.print(messageId);
@@ -45,19 +42,17 @@ void loop() {
 
 
 // Message structure
-// 0101|10101|0101|10101010101
-// NODE|_SENS|_MSG|_FLOAT
+// 10101|01010101|10101010101
+// |_SENS|_MSG|_FLOAT
 // FLOAT is reprsented as follows
 // 1|0101010101
 // +/-|VALUE * 10
-String encodeMessage(int nodeId, int sensorId, int messageId, float value) {
+String encodeMessage(int sensorId, int messageId, float value) {
   String res = "";
-  Serial.println(res);
-  res += encodeInt(nodeId, 4);
   Serial.println(res);
   res += encodeInt(sensorId, 5);
   Serial.println(res);
-  res += encodeInt(messageId, 4);
+  res += encodeInt(messageId, 8);
 
   if (value < 0) {
     res += "1";
@@ -67,9 +62,7 @@ String encodeMessage(int nodeId, int sensorId, int messageId, float value) {
 
   res += encodeInt((int) (abs(value) * 10), 10);
 
-  Serial.print("[DEBUG] NodeId=");
-  Serial.print(nodeId);
-  Serial.print(", SensorId=");
+  Serial.print("[DEBUG] SensorId=");
   Serial.print(sensorId);
   Serial.print(", MessageId=");
   Serial.print(messageId);
@@ -82,16 +75,12 @@ String encodeMessage(int nodeId, int sensorId, int messageId, float value) {
   return res;
 }
 
-int decodeNodeId(String message) {
+int decodeSensorId(String message) {
   return decodeInt(message.substring(0,4));
 }
 
-int decodeSensorId(String message) {
-  return decodeInt(message.substring(4, 9));
-}
-
 int decodeMessageId(String message) {
-  return decodeInt(message.substring(9, 13));
+  return decodeInt(message.substring(4, 13));
 }
 
 float decodeValue(String message) {

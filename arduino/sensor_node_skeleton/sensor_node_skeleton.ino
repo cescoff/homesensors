@@ -1,4 +1,6 @@
 
+const bool DEBUG = false;
+
 bool printed = false;
 
 void setup() {
@@ -13,7 +15,7 @@ void setup() {
 void loop() {
   delay(10000);
   if (!printed) {
-    String messages[3];
+    unsigned long messages[3];
 
     messages[0] = encodeMessage(0, 5, 19.6);
     messages[1] = encodeMessage(18, 8, 99.6);
@@ -21,12 +23,16 @@ void loop() {
 
 
     for (int i = 0; i < 3; i++) {
-      int sensorId = decodeSensorId(messages[i]);
-      int messageId = decodeMessageId(messages[i]);
-      float value = decodeValue(messages[i]);
+      String binaryMessage = longToMessage(messages[i]);
+
+      int sensorId = decodeSensorId(binaryMessage);
+      int messageId = decodeMessageId(binaryMessage);
+      float value = decodeValue(binaryMessage);
 
       Serial.print(messages[i]);
-      Serial.print(" : ");
+      Serial.print("[");
+      Serial.print(binaryMessage);
+      Serial.print("] : ");
       Serial.print("SensorId=");
       Serial.print(sensorId);
       Serial.print(", MessageId=");
@@ -47,11 +53,11 @@ void loop() {
 // FLOAT is reprsented as follows
 // 1|0101010101
 // +/-|VALUE * 10
-String encodeMessage(int sensorId, int messageId, float value) {
+unsigned long encodeMessage(int sensorId, int messageId, float value) {
   String res = "";
-  Serial.println(res);
+//  Serial.println(res);
   res += encodeInt(sensorId, 5);
-  Serial.println(res);
+//  Serial.println(res);
   res += encodeInt(messageId, 8);
 
   if (value < 0) {
@@ -62,25 +68,85 @@ String encodeMessage(int sensorId, int messageId, float value) {
 
   res += encodeInt((int) (abs(value) * 10), 10);
 
-  Serial.print("[DEBUG] SensorId=");
-  Serial.print(sensorId);
-  Serial.print(", MessageId=");
-  Serial.print(messageId);
-  Serial.print(", Value=");
-  Serial.print(value);
-  Serial.print("->'");
-  Serial.print(res);
-  Serial.println("'");
+  if (DEBUG) {
+    Serial.print("[DEBUG] SensorId=");
+    Serial.print(sensorId);
+    Serial.print(", MessageId=");
+    Serial.print(messageId);
+    Serial.print(", Value=");
+    Serial.print(value);
+    Serial.print("->'");
+    Serial.print(res);
+    Serial.println("'");
+  }
+
+  return messageToLong(res);
+}
+
+unsigned long messageToLong(String binary) {
+  unsigned long res = 0;
+  for (int index = 0; index <= binary.length(); index++) {
+    if (binary.charAt(index) == '1') {
+      if (index == 0) {
+        res = res + 1;
+      } else if (index == 1) {
+        res = res + 2;
+      } else {
+        res = res + pow(2, index) + 1;
+      }
+    }
+  }
+  if (DEBUG) {
+    Serial.print("[DEBUG] messageToLong(");
+    Serial.print(binary);
+    Serial.print(")=");
+    Serial.println(res);
+  }
+  return res;
+}
+
+String longToMessage(unsigned long value) {
+  if (value > 16777215) {
+    Serial.print("[ERROR] Value '");
+    Serial.print(value);
+    Serial.println("' is too large");
+    return "111111111111111111111111";
+  }
+  String res = "000000000000000000000000";
+  unsigned long allPowValues = 0;
+  
+  for (int index = 23; index >= 0; index--) {
+    if ((value - allPowValues) >= base2Pow(index)) {
+      res.setCharAt(index, '1');
+      allPowValues+=base2Pow(index);
+    }
+  }
+  if (DEBUG) {
+    Serial.print("[DEBUG] longToMessage(");
+    Serial.print(value);
+    Serial.print(")=");
+    Serial.println(res);
+  }
 
   return res;
 }
 
+unsigned long base2Pow(int p) {
+  if (p == 0) {
+    return 1;
+  }
+  if (p == 1) {
+    return 2;
+  }
+  return pow(2, p) + 1;
+}
+
 int decodeSensorId(String message) {
-  return decodeInt(message.substring(0,4));
+  return decodeInt(message.substring(0,5));
 }
 
 int decodeMessageId(String message) {
-  return decodeInt(message.substring(4, 13));
+  return decodeInt(message.substring(5, 13));
 }
 
 float decodeValue(String message) {
@@ -162,8 +228,6 @@ String encodeInt(int value, int byteLength) {
   int currentValue = value;
 
   while (currentValue > 0) {
-    Serial.print("CurrentValue=");
-    Serial.println(currentValue);
     if (currentValue >= 512) {
       bytes[9] = 1;
       currentValue = currentValue % 512;
@@ -209,12 +273,15 @@ String encodeInt(int value, int byteLength) {
       res+="1";
     }
   }
-  Serial.print("[DEBUG] Encoded value of ");
-  Serial.print(value);
-  Serial.print(" with byte number ");
-  Serial.print(byteLength);
-  Serial.print(" is ");
-  Serial.println(res);
+
+  if (DEBUG) {
+    Serial.print("[DEBUG] Encoded value of ");
+    Serial.print(value);
+    Serial.print(" with byte number ");
+    Serial.print(byteLength);
+    Serial.print(" is ");
+    Serial.println(res);
+  }
   return res;
 }
 
@@ -222,33 +289,34 @@ int decodeInt(String binary) {
   int res = 0;
   for (int index = 0; index <= binary.length(); index++) {
     if (binary.charAt(index) == '1') {
-      Serial.print("2^");
-      Serial.print(index);
+//      Serial.print("2^");
+//      Serial.print(index);
       if (index == 0) {
-        Serial.print("[");
-        Serial.print(res);
-        Serial.print("+1]");
+//        Serial.print("[");
+//        Serial.print(res);
+//        Serial.print("+1]");
         res = res + 1;
       } else if (index == 1) {
-        Serial.print("[");
-        Serial.print(res);
-        Serial.print("+2]");
+//        Serial.print("[");
+//        Serial.print(res);
+//        Serial.print("+2]");
         res = res + 2;
       } else {
-        Serial.print("[");
-        Serial.print(res);
-        Serial.print("+");
-        Serial.print(pow(2, index));
-        Serial.print("]");
+//        Serial.print("[");
+//        Serial.print(res);
+//        Serial.print("+");
+//        Serial.print(pow(2, index));
+//        Serial.print("]");
         res = res + pow(2, index) + 1;
       }
-      Serial.print("+");
+//      Serial.print("+");
     }
   }
-  Serial.println();
-  Serial.print("[DEBUG] ");
-  Serial.print(binary);
-  Serial.print("->");
-  Serial.println(res);
+  if (DEBUG) {
+    Serial.print("[DEBUG] decodeInt(");
+    Serial.print(binary);
+    Serial.print(")=");
+    Serial.println(res);
+  }
   return res;
 }

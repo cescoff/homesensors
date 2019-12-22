@@ -1,115 +1,207 @@
 #include <RCSwitch.h>
 #include <SPI.h> 
-#include <nRF24L01.h>
-#include <RF24.h>
-#include <printf.h>
+#include <Ethernet.h>
+
+// Sensor RADIO
+RCSwitch reciever = RCSwitch();
+
+// 2326701c-43f7-4b78-ad44-f918e8e8bbb6 = CAVE
+// 5ccbfff8-f217-41b9-9f11-65641a58f99e = EXTERIEUR
+// e8170a8d-f059-49aa-bfac-56d6f4c499b6 = SALON
+
+const String uuids[] = { "NO VALUE FOR 0", "5ccbfff8-f217-41b9-9f11-65641a58f99e", "2326701c-43f7-4b78-ad44-f918e8e8bbb6", "e8170a8d-f059-49aa-bfac-56d6f4c499b6" };
+int last_message_ids[] = {-1, -1, -1, -1};
+
+const char FOLDER[] = "geanges";
 
 const bool DEBUG = false;
-const long maxMessageValue = 16777215;
 
-                                           // Hardware configuration
-RF24 radio(7,8);                           // Set up nRF24L01 radio on SPI bus plus pins 7 & 8
+bool printed = false;
 
-const uint64_t pipeIn = 0xE8E8F0F0E1LL; //IMPORTANT: The same as in the receiver!!!
+// ETHERNET
 
-RCSwitch mySwitch = RCSwitch();
+// Enter a MAC address for your controller below.
+// Newer Ethernet shields have a MAC address printed on a sticker on the shield
+byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
-unsigned long lastPingMillis = 0;
+// if you don't want to use DNS (and reduce your sketch size)
+// use the numeric IP instead of the name for the server:
+//IPAddress server(74,125,232,128);  // numeric IP for Google (no DNS)
+const char GET_REPORT_SERVER[] = "sensors.rattratpchair.org";
+const char GET_REPORT_URI[] = "/report";
+const char GET_PING_URI[] = "/ping";
+
+// Set the static IP address to use if the DHCP fails to assign
+IPAddress ip(192, 168, 0, 0);
+IPAddress myDns(192, 168, 0, 254);
+
+// Initialize the Ethernet client library
+// with the IP address and port of the server
+// that you want to connect to (port 80 is default for HTTP):
+EthernetClient client;
+
+// Variables to measure the speed
+unsigned long beginMicros, endMicros;
+unsigned long byteCount = 0;
+bool printWebData = true;  // set to false for better speed measurement
+
 
 void setup() {
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
-  Serial.println("Sensor V2 Basic Radio Node");
+  while (!Serial) {
+    ; // wait for serial port to connect. Needed for native USB port only
+  }
+
+  reciever.enableReceive(0);  // Receiver on interrupt 0 => that is pin #2
+
+  // start the Ethernet connection:
+  Serial.println("Initialize Ethernet with DHCP:");
+  if (Ethernet.begin(mac) == 0) {
+    Serial.println("Failed to configure Ethernet using DHCP");
+    // Check for Ethernet hardware present
+    if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+      Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+      while (true) {
+        delay(1); // do nothing, no point running without Ethernet hardware
+      }
+    }
+    if (Ethernet.linkStatus() == LinkOFF) {
+      Serial.println("Ethernet cable is not connected.");
+    }
+    // try to congifure using IP address instead of DHCP:
+    Ethernet.begin(mac, ip, myDns);
+  } else {
+    Serial.print("  DHCP assigned IP ");
+    Serial.println(Ethernet.localIP());
+  }
+  // give the Ethernet shield a second to initialize:
+  delay(1000);
+
+  Serial.println("Sensor V2 Geange Gateway");
   Serial.println();
 
-// RCSWITCH
-//  mySwitch.enableReceive(0);  // Receiver on interrupt 0 => that is pin #2
-
-  // send an intro:
-
-  radio.begin();                           // Setup and configure rf radio
-  radio.setAutoAck(false);
-  radio.setPALevel(RF24_PA_MIN);           // If you want to save power use "RF24_PA_MIN" but keep in mind that reduces the module's range
-  radio.setDataRate(RF24_250KBPS);
-  radio.setCRCLength(RF24_CRC_8);
-  radio.openWritingPipe(pipeIn);
-  radio.stopListening();          //This sets the module as transmitter
-
-  Serial.println("Printing radio details");
-  delay(100);
-  Serial.println("BEGIN");
-
-  printf_begin();
-  radio.printDetails();                    // Dump the configuration of the rf unit for debugging
-
-  if (!radio.isChipConnected()) {
-    Serial.println("[ERROR] chip is not connected");
-  }
-  
-//  radio.powerUp();
+  Serial.println("Performing ping");
+  performPing();
   
 }
 
 void loop() {
-//  Serial.print("LOOP : ");
-//  Serial.println((millis() - lastPingMillis));
-//  delay(100);
-  if ((millis() - lastPingMillis) >= 15000) {
-    Serial.print("[PING] : '");
-
-    unsigned long pingMessage = encodeMessage(0, 1, 1.1);
-
-    Serial.print(pingMessage);
-
-    if(!radio.write(&pingMessage,  sizeof(unsigned long))) {   //Write to the FIFO buffers        
-        Serial.println("' FAILED to send message");                     //Keep count of failed payloads
-        if (!radio.isChipConnected()) {
-          Serial.println("[ERROR] chip is not connected");
-        }
-    } else {
-        Serial.println("' Successfully sent a message");                     //Keep count of failed payloads
-    }
-    
-    lastPingMillis = millis();
-  }
-
-  if (mySwitch.available()) {
+  if (reciever.available()) {
   
-    Serial.print("mySwitch.getReceivedValue()::");
-    Serial.println(mySwitch.getReceivedValue());
+/*    Serial.print("reciever.getReceivedValue()::");
+    Serial.println(reciever.getReceivedValue());*/
 
-    unsigned long num = mySwitch.getReceivedValue();
+    unsigned long num = reciever.getReceivedValue();
 
 
-    mySwitch.resetAvailable();
+    reciever.resetAvailable();
 
-    if (DEBUG) {
-      String message = longToMessage(num);
-      Serial.println( message );
-      int sensorId = decodeSensorId(message);
-      int messageId = decodeMessageId(message);
-      float value = decodeValue(message);
+    String message = longToMessage(num);
+//    Serial.println( message );
+    int sensorId = decodeSensorId(message);
+    int messageId = decodeMessageId(message);
+    float value = decodeValue(message);
+
+    if (sensorId > 0 && sensorId <= 3 && last_message_ids[sensorId] != messageId) {
+      Serial.println("Uploading message");
+      sendData(uuids[sensorId], value);
+      Serial.print(uuids[sensorId]);
+      Serial.print(";");
+      Serial.print(messageId);
+      Serial.print(";");
+      Serial.println(value);
+      last_message_ids[sensorId] = messageId;
+    } /* else {
+      Serial.println("Ignoring message");
       Serial.print(sensorId);
       Serial.print(";");
       Serial.print(messageId);
       Serial.print(";");
       Serial.println(value);
-      char str_temp[6];
-      char string[32];
-      dtostrf(value, 4, 2, str_temp);
-      sprintf(string, "%d;%d;%s", sensorId, messageId, str_temp);
-    }
-
-    if(!radio.write(&num, sizeof(unsigned long))) {   //Write to the FIFO buffers        
-        Serial.println("FAILED to send message");                     //Keep count of failed payloads
-    } else {
-        Serial.println("Successfully sent a message");                     //Keep count of failed payloads
-    }
-
+    }*/
   }
-  
 }
 
+void performPing() {
+  Serial.print("Connecting to ");
+  Serial.print(GET_REPORT_SERVER);
+  Serial.println("...");
+
+  // if you get a connection, report back via serial:
+  if (client.connect(GET_REPORT_SERVER, 80)) {
+    Serial.print("connected to ");
+    Serial.println(client.remoteIP());
+    // Make a HTTP request:
+    client.print("GET ");
+    client.print(GET_PING_URI);
+    client.print("?f=");
+    client.print(FOLDER);
+    client.println(" HTTP/1.1");
+    client.print("Host: ");
+    client.println(GET_REPORT_SERVER);
+  } else {
+    // if you didn't get a connection to the server:
+    Serial.println("connection failed");
+  }
+  
+  int len = client.available();
+  while (len > 0) {
+    byte buff[80];
+    if (len > 80) len = 80;
+    client.read(buff, len);
+    len = client.available();
+  }
+  
+  if (!client.connected()) {
+    endMicros = micros();
+    Serial.println();
+    Serial.println("disconnecting.");
+    client.stop();
+  }
+}
+
+void sendData(String sensorId, float value) {
+  Serial.print("Connecting to ");
+  Serial.print(GET_REPORT_SERVER);
+  Serial.println("...");
+
+  // if you get a connection, report back via serial:
+  if (client.connect(GET_REPORT_SERVER, 80)) {
+    Serial.print("connected to ");
+    Serial.println(client.remoteIP());
+    // Make a HTTP request:
+    client.print("GET ");
+    client.print(GET_REPORT_URI);
+    client.print("?f=");
+    client.print(FOLDER);
+    client.print("&s=");
+    client.print(sensorId);
+    client.print("&v=");
+    client.print(value);
+    client.println(" HTTP/1.1");
+    client.print("Host: ");
+    client.println(GET_REPORT_SERVER);
+  } else {
+    // if you didn't get a connection to the server:
+    Serial.println("connection failed");
+  }
+  
+  int len = client.available();
+  while (len > 0) {
+    byte buff[80];
+    if (len > 80) len = 80;
+    client.read(buff, len);
+    len = client.available();
+  }
+  
+  if (!client.connected()) {
+    endMicros = micros();
+    Serial.println();
+    Serial.println("disconnecting.");
+    client.stop();
+  }
+}
 
 // Message structure
 // 10101|01010101|10101010101
@@ -170,7 +262,7 @@ unsigned long messageToLong(String binary) {
 }
 
 String longToMessage(unsigned long value) {
-  if (value > maxMessageValue) {
+  if (value > 16777215) {
     Serial.print("[ERROR] Value '");
     Serial.print(value);
     Serial.println("' is too large");

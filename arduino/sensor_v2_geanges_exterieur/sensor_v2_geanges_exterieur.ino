@@ -1,114 +1,51 @@
 #include <RCSwitch.h>
 #include <SPI.h> 
-#include <nRF24L01.h>
-#include <RF24.h>
-#include <printf.h>
+#include <OneWire.h>
+#include <DallasTemperature.h>
+#include <Wire.h> 
+
+#define ONE_WIRE_BUS1 5
 
 const bool DEBUG = false;
-const long maxMessageValue = 16777215;
-
-                                           // Hardware configuration
-RF24 radio(7,8);                           // Set up nRF24L01 radio on SPI bus plus pins 7 & 8
-
-const uint64_t pipeIn = 0xE8E8F0F0E1LL; //IMPORTANT: The same as in the receiver!!!
 
 RCSwitch mySwitch = RCSwitch();
+OneWire oneWire1(ONE_WIRE_BUS1);
+DallasTemperature sensors(&oneWire1);
+float celcius=0;
+
+const int currentSensorId=15;
+int mId=1;
 
 unsigned long lastPingMillis = 0;
 
 void setup() {
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
-  Serial.println("Sensor V2 Basic Radio Node");
-  Serial.println();
 
-// RCSWITCH
-//  mySwitch.enableReceive(0);  // Receiver on interrupt 0 => that is pin #2
+  mySwitch.enableTransmit(10);
 
   // send an intro:
-
-  radio.begin();                           // Setup and configure rf radio
-  radio.setAutoAck(false);
-  radio.setPALevel(RF24_PA_MIN);           // If you want to save power use "RF24_PA_MIN" but keep in mind that reduces the module's range
-  radio.setDataRate(RF24_250KBPS);
-  radio.setCRCLength(RF24_CRC_8);
-  radio.openWritingPipe(pipeIn);
-  radio.stopListening();          //This sets the module as transmitter
-
-  Serial.println("Printing radio details");
-  delay(100);
-  Serial.println("BEGIN");
-
-  printf_begin();
-  radio.printDetails();                    // Dump the configuration of the rf unit for debugging
-
-  if (!radio.isChipConnected()) {
-    Serial.println("[ERROR] chip is not connected");
-  }
-  
-//  radio.powerUp();
-  
+  Serial.println("Sensor V2 Geanges Exterieur");
+  Serial.println();
 }
 
 void loop() {
-//  Serial.print("LOOP : ");
-//  Serial.println((millis() - lastPingMillis));
-//  delay(100);
   if ((millis() - lastPingMillis) >= 15000) {
-    Serial.print("[PING] : '");
+    sensors.requestTemperatures(); 
+    celcius=sensors.getTempCByIndex(0);    
 
-    unsigned long pingMessage = encodeMessage(0, 1, 1.1);
-
-    Serial.print(pingMessage);
-
-    if(!radio.write(&pingMessage,  sizeof(unsigned long))) {   //Write to the FIFO buffers        
-        Serial.println("' FAILED to send message");                     //Keep count of failed payloads
-        if (!radio.isChipConnected()) {
-          Serial.println("[ERROR] chip is not connected");
-        }
-    } else {
-        Serial.println("' Successfully sent a message");                     //Keep count of failed payloads
-    }
-    
+    mId=(mId + 1) % 255;
+    unsigned long message = encodeMessage(currentSensorId, mId, celcius);
+    Serial.print("Sending temperature message '");
+    Serial.print(message);
+    Serial.println("'");
+    mySwitch.send(message, 32);
+  
     lastPingMillis = millis();
   }
 
-  if (mySwitch.available()) {
-  
-    Serial.print("mySwitch.getReceivedValue()::");
-    Serial.println(mySwitch.getReceivedValue());
-
-    unsigned long num = mySwitch.getReceivedValue();
-
-
-    mySwitch.resetAvailable();
-
-    if (DEBUG) {
-      String message = longToMessage(num);
-      Serial.println( message );
-      int sensorId = decodeSensorId(message);
-      int messageId = decodeMessageId(message);
-      float value = decodeValue(message);
-      Serial.print(sensorId);
-      Serial.print(";");
-      Serial.print(messageId);
-      Serial.print(";");
-      Serial.println(value);
-      char str_temp[6];
-      char string[32];
-      dtostrf(value, 4, 2, str_temp);
-      sprintf(string, "%d;%d;%s", sensorId, messageId, str_temp);
-    }
-
-    if(!radio.write(&num, sizeof(unsigned long))) {   //Write to the FIFO buffers        
-        Serial.println("FAILED to send message");                     //Keep count of failed payloads
-    } else {
-        Serial.println("Successfully sent a message");                     //Keep count of failed payloads
-    }
-
-  }
-  
 }
+
 
 
 // Message structure
@@ -170,7 +107,7 @@ unsigned long messageToLong(String binary) {
 }
 
 String longToMessage(unsigned long value) {
-  if (value > maxMessageValue) {
+  if (value > 16777215) {
     Serial.print("[ERROR] Value '");
     Serial.print(value);
     Serial.println("' is too large");
@@ -180,9 +117,10 @@ String longToMessage(unsigned long value) {
   unsigned long allPowValues = 0;
   
   for (int index = 23; index >= 0; index--) {
-    if ((value - allPowValues) >= base2Pow(index)) {
+    unsigned long powValue = base2Pow(index);
+    if ((value - allPowValues) >= powValue) {
       res.setCharAt(index, '1');
-      allPowValues+=base2Pow(index);
+      allPowValues+=powValue;
     }
   }
   if (DEBUG) {

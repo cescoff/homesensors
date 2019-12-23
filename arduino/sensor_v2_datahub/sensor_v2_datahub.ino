@@ -26,14 +26,14 @@ byte mac[] = { 0xDE, 0xAD, 0xBE, 0xEF, 0xFE, 0xED };
 
 // if you don't want to use DNS (and reduce your sketch size)
 // use the numeric IP instead of the name for the server:
-//IPAddress server(74,125,232,128);  // numeric IP for Google (no DNS)
-const char GET_REPORT_SERVER[] = "sensors.rattratpchair.org";
+IPAddress server(52, 47, 106, 177);  // numeric IP for Google (no DNS)
+const char GET_REPORT_SERVER[] = "sensors.rattrapchair.org";
 const char GET_REPORT_URI[] = "/report";
 const char GET_PING_URI[] = "/ping";
 
 // Set the static IP address to use if the DHCP fails to assign
-IPAddress ip(192, 168, 0, 0);
-IPAddress myDns(192, 168, 0, 254);
+IPAddress ip(192, 168, 0, 9);
+IPAddress myDns(8, 8, 8, 8);
 
 // Initialize the Ethernet client library
 // with the IP address and port of the server
@@ -45,6 +45,7 @@ unsigned long beginMicros, endMicros;
 unsigned long byteCount = 0;
 bool printWebData = true;  // set to false for better speed measurement
 
+unsigned long lastPingMillis = 0;
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -56,32 +57,32 @@ void setup() {
   reciever.enableReceive(0);  // Receiver on interrupt 0 => that is pin #2
 
   // start the Ethernet connection:
-  Serial.println("Initialize Ethernet with DHCP:");
+  Serial.println(F("Initialize Ethernet with DHCP:"));
   if (Ethernet.begin(mac) == 0) {
-    Serial.println("Failed to configure Ethernet using DHCP");
+    Serial.println(F("Failed to configure Ethernet using DHCP"));
     // Check for Ethernet hardware present
     if (Ethernet.hardwareStatus() == EthernetNoHardware) {
-      Serial.println("Ethernet shield was not found.  Sorry, can't run without hardware. :(");
+      Serial.println(F("Ethernet shield was not found.  Sorry, can't run without hardware. :("));
       while (true) {
         delay(1); // do nothing, no point running without Ethernet hardware
       }
     }
     if (Ethernet.linkStatus() == LinkOFF) {
-      Serial.println("Ethernet cable is not connected.");
+      Serial.println(F("Ethernet cable is not connected."));
     }
     // try to congifure using IP address instead of DHCP:
     Ethernet.begin(mac, ip, myDns);
   } else {
-    Serial.print("  DHCP assigned IP ");
+    Serial.print(F("  DHCP assigned IP "));
     Serial.println(Ethernet.localIP());
   }
   // give the Ethernet shield a second to initialize:
   delay(1000);
 
-  Serial.println("Sensor V2 Geange Gateway");
+  Serial.println(F("Sensor V2 Geange Gateway"));
   Serial.println();
 
-  Serial.println("Performing ping");
+  Serial.println(F("Performing ping"));
   performPing();
   
 }
@@ -104,13 +105,7 @@ void loop() {
     float value = decodeValue(message);
 
     if (sensorId > 0 && sensorId <= 3 && last_message_ids[sensorId] != messageId) {
-      Serial.println("Uploading message");
       sendData(uuids[sensorId], value);
-      Serial.print(uuids[sensorId]);
-      Serial.print(";");
-      Serial.print(messageId);
-      Serial.print(";");
-      Serial.println(value);
       last_message_ids[sensorId] = messageId;
     } /* else {
       Serial.println("Ignoring message");
@@ -121,86 +116,138 @@ void loop() {
       Serial.println(value);
     }*/
   }
+
+  if ((millis() - lastPingMillis) >= 60000) {
+    performPing();
+    lastPingMillis = millis();
+  }
 }
 
 void performPing() {
-  Serial.print("Connecting to ");
+  Serial.println(F("------------------------------------"));
+  Serial.println(F("Performing ping"));
+  Serial.print(F("Connecting to "));
   Serial.print(GET_REPORT_SERVER);
-  Serial.println("...");
+  Serial.println(F("..."));
 
   // if you get a connection, report back via serial:
   if (client.connect(GET_REPORT_SERVER, 80)) {
-    Serial.print("connected to ");
+    Serial.print(F("connected to "));
     Serial.println(client.remoteIP());
     // Make a HTTP request:
-    client.print("GET ");
+    client.print(F("GET "));
     client.print(GET_PING_URI);
-    client.print("?f=");
+    client.print(F("?f="));
     client.print(FOLDER);
-    client.println(" HTTP/1.1");
-    client.print("Host: ");
+    client.println(F(" HTTP/1.1"));
+    client.print(F("Host: "));
     client.println(GET_REPORT_SERVER);
+    client.println(F("Accept: */*"));
+    client.println(F("User-Agent: ArduinoClient/GeangesV2"));
+    client.println(F("Connection: close\r\n"));
+    client.println();
+    client.println();
   } else {
     // if you didn't get a connection to the server:
-    Serial.println("connection failed");
+    Serial.println(F("connection failed"));
   }
-  
-  int len = client.available();
-  while (len > 0) {
-    byte buff[80];
-    if (len > 80) len = 80;
-    client.read(buff, len);
-    len = client.available();
+
+  int connectLoop=0;
+  while(client.connected()) {
+    if (connectLoop > 30000) {
+      Serial.println(F("TIMEOUT"));
+      client.stop();
+    }
+    int len = client.available();
+    while (client.available()) {
+//      Serial.println(F("Read packet"));
+      byte buff[80];
+      if (len > 80) len = 80;
+      client.read(buff, len);
+      if (DEBUG) {
+        Serial.write(buff, len);
+      }
+      len = client.available();
+    }
+    delay(1);
+    connectLoop++;
   }
-  
   if (!client.connected()) {
     endMicros = micros();
     Serial.println();
-    Serial.println("disconnecting.");
+    Serial.println(F("disconnecting."));
     client.stop();
   }
+  Serial.println();
+  Serial.println(F("------------------------------------"));
+  delay(1000);
 }
 
 void sendData(String sensorId, float value) {
-  Serial.print("Connecting to ");
+  Serial.println(F("------------------------------------"));
+  Serial.print(F("Uploading message sensorId="));
+  Serial.print(sensorId);
+  Serial.print(F(", value="));
+  Serial.println(value);
+  Serial.print(F("Connecting to "));
   Serial.print(GET_REPORT_SERVER);
   Serial.println("...");
 
   // if you get a connection, report back via serial:
   if (client.connect(GET_REPORT_SERVER, 80)) {
-    Serial.print("connected to ");
+    Serial.print(F("connected to "));
     Serial.println(client.remoteIP());
     // Make a HTTP request:
-    client.print("GET ");
+    client.print(F("GET "));
     client.print(GET_REPORT_URI);
-    client.print("?f=");
+    client.print(F("?f="));
     client.print(FOLDER);
-    client.print("&s=");
+    client.print(F("&s="));
     client.print(sensorId);
-    client.print("&v=");
+    client.print(F("&v="));
     client.print(value);
-    client.println(" HTTP/1.1");
-    client.print("Host: ");
+    client.println(F(" HTTP/1.1"));
+    client.print(F("Host: "));
     client.println(GET_REPORT_SERVER);
+    client.println(F("Accept: */*"));
+    client.println(F("User-Agent: ArduinoClient/GeangesV2"));
+    client.println(F("Connection: close\r\n"));
+    client.println();
+    client.println();
   } else {
     // if you didn't get a connection to the server:
-    Serial.println("connection failed");
+    Serial.println(F("connection failed"));
   }
   
-  int len = client.available();
-  while (len > 0) {
-    byte buff[80];
-    if (len > 80) len = 80;
-    client.read(buff, len);
-    len = client.available();
+  int connectLoop=0;
+  while(client.connected()) {
+    if (connectLoop > 30000) {
+      Serial.println(F("TIMEOUT"));
+      client.stop();
+    }
+    int len = client.available();
+    while (client.available()) {
+//      Serial.println(F("Read packet"));
+      byte buff[80];
+      if (len > 80) len = 80;
+      client.read(buff, len);
+      if (DEBUG) {
+        Serial.write(buff, len);
+      }
+      len = client.available();
+    }
+    delay(1);
+    connectLoop++;
   }
-  
   if (!client.connected()) {
     endMicros = micros();
     Serial.println();
-    Serial.println("disconnecting.");
+    Serial.println(F("disconnecting."));
     client.stop();
   }
+  Serial.println();
+  Serial.println(F("------------------------------------"));
+  delay(1000);
 }
 
 // Message structure

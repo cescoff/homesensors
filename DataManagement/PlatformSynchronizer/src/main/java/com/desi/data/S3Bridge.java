@@ -51,9 +51,11 @@ public class S3Bridge {
 
     private final File awsCredentialsConfigurationFile;
 
-    private PlatformCredentialsConfig credentialsConfig;
-
     private final PlatformClientId clientId;
+
+    private final String folder;
+
+    private PlatformCredentialsConfig credentialsConfig;
 
     private String accessKey;
 
@@ -61,10 +63,11 @@ public class S3Bridge {
 
     private AtomicBoolean INIT_DONE = new AtomicBoolean(false);
 
-    public S3Bridge(Iterable<Connector> connectors, File awsCredentialsConfigurationFile, PlatformClientId clientId) {
+    public S3Bridge(Iterable<Connector> connectors, File awsCredentialsConfigurationFile, PlatformClientId clientId, final String folder) {
         this.connectors = connectors;
         this.awsCredentialsConfigurationFile = awsCredentialsConfigurationFile;
         this.clientId = clientId;
+        this.folder = folder;
     }
 
 
@@ -112,10 +115,12 @@ public class S3Bridge {
         final ImmutableList.Builder<SensorRecord> records = ImmutableList.builder();
 
         for (S3ObjectSummary os : objects) {
-            S3Object fullObject = s3.getObject(new GetObjectRequest(os.getBucketName(), os.getKey()));
             try {
-                logger.info("Parsing content for object s3://" + os.getBucketName() + "/" + os.getKey());
-                records.addAll(parseContent(fullObject.getObjectContent()));
+                if (StringUtils.contains(os.getKey(), folder + "/") && !StringUtils.contains(os.getKey(), "archives/")) {
+                    S3Object fullObject = s3.getObject(new GetObjectRequest(os.getBucketName(), os.getKey()));
+                    logger.info("Parsing content for object s3://" + os.getBucketName() + "/" + os.getKey());
+                    records.addAll(parseContent(fullObject.getObjectContent()));
+                }
             } catch (Exception e) {
                 logger.error("Failed to parse file s3://" + os.getBucketName() + "/" + os.getKey() + ": " + e.getMessage(), e);
             }
@@ -262,7 +267,11 @@ public class S3Bridge {
                 logger.warn("Synchronization process returned any data synchronized");
                 System.exit(4);
             }*/
-            if (!new S3Bridge(ImmutableList.<Connector>of(new BigQueryConnector()/*, new SpreadSheetConverter()*/), new File(args[0]), PlatformClientId.S3Bridge).sync()) {
+            if (!new S3Bridge(ImmutableList.<Connector>of(new BigQueryConnector("Records")/*, new SpreadSheetConverter()*/), new File(args[0]), PlatformClientId.S3Bridge, "peri").sync()) {
+                logger.warn("Synchronization process returned any data synchronized");
+                System.exit(4);
+            }
+            if (!new S3Bridge(ImmutableList.<Connector>of(new BigQueryConnector("GeangesRecords")/*, new SpreadSheetConverter()*/), new File(args[0]), PlatformClientId.S3Bridge, "geanges").sync()) {
                 logger.warn("Synchronization process returned any data synchronized");
                 System.exit(4);
             }

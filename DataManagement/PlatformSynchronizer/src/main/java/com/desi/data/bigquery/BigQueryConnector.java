@@ -6,11 +6,9 @@ import com.desi.data.bean.DefaultHeatingLevelRecord;
 import com.desi.data.bean.TemperatureRecord;
 import com.desi.data.config.PlatformCredentialsConfig;
 import com.desi.data.impl.StaticSensorNameProvider;
-import com.desi.data.utils.HeatingLevelHelper;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.bigquery.*;
-import com.google.common.base.Function;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
@@ -21,7 +19,6 @@ import org.joda.time.LocalDateTime;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 
-import javax.swing.text.html.Option;
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileNotFoundException;
@@ -30,7 +27,6 @@ import java.text.DecimalFormat;
 import java.util.Collections;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
 
 public class BigQueryConnector implements Connector {
 
@@ -38,7 +34,7 @@ public class BigQueryConnector implements Connector {
 
     private static final LocalDateTime DEFAULT_CHECKPOINT_VALUE = LocalDateTime.parse("2019-11-4T00:00:00");
 
-    private static final String DATASET_NAME = "Records";
+    private static final String DATASET_NAME_PARAMETER = "${DATASET}";
 
     private static final String SENSOR_RECORDS_TABLE_NAME = "SensorData";
 
@@ -56,23 +52,28 @@ public class BigQueryConnector implements Connector {
 
     private static final String CHECKPOINT_ATTRIBUTE_NAME = "checkpoint";
 
-    private static final String GET_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME + ".SensorData records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
+    private static final String GET_WITHOUT_DATASET_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME_PARAMETER + ".SensorData records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
 
-    private static final String GET_AGGREGATED_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME + ".SensorDataAggregated records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND AggregationScope=" + AGGREGATION_SCOPE_PARAMETER;
+    private static final String GET_WITHOUT_DATASET_AGGREGATED_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME_PARAMETER + ".SensorDataAggregated records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND AggregationScope=" + AGGREGATION_SCOPE_PARAMETER;
 
-    private static final String GET_SENSOR_RAW_DATA_QUERY = "SELECT DateTime, Value FROM " + DATASET_NAME + ".SensorData WHERE SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND DateTime>\"" + DATETIME_QUERY_PARAMETER + "\"";
+    private static final String GET_WITHOUT_DATASET_SENSOR_RAW_DATA_QUERY = "SELECT DateTime, Value FROM " + DATASET_NAME_PARAMETER + ".SensorData WHERE SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND DateTime>\"" + DATETIME_QUERY_PARAMETER + "\"";
 
-    private static final String GET_SENSOR_IDS_QUERY = "SELECT SensorId FROM " + DATASET_NAME + ".SensorNames";
+    private static final String GET_WITHOUT_DATASET_SENSOR_IDS_QUERY = "SELECT SensorId FROM " + DATASET_NAME_PARAMETER + ".SensorNames";
 
-    private static final String GET_HEATING_LEARNING_DATA = "SELECT DateTime, Value, SensorName, SensorId, Type, AggregationScope FROM " + DATASET_NAME + ".HeatingLearningData  WHERE DateTime >= \"" + DATETIME_QUERY_PARAMETER + "\"";
+    private static final String GET_WITHOUT_DATASET_HEATING_LEARNING_DATA = "SELECT DateTime, Value, SensorName, SensorId, Type, AggregationScope FROM " + DATASET_NAME_PARAMETER + ".HeatingLearningData  WHERE DateTime >= \"" + DATETIME_QUERY_PARAMETER + "\"";
 
-    private static final String GET_HEATING_LEVEL_CHECKPOINT = "SELECT Max(DateTime) FROM " + DATASET_NAME + ".HeatingLevel";
+    private static final String GET_WITHOUT_DATASET_HEATING_LEVEL_CHECKPOINT = "SELECT Max(DateTime) FROM " + DATASET_NAME_PARAMETER + ".HeatingLevel";
 
     // Used to calculate average during the last 30 minutes for heating thresholding
     private static final int MINUTES_BACK_TO_THE_PAST = 50;
 
     private BigQuery bigQuery;
 
+    private final String dataSetName;
+
+    public BigQueryConnector(String dataSetName) {
+        this.dataSetName = dataSetName;
+    }
 
     @Override
     public Optional<PlatformClientId> getPlatformId() {
@@ -112,7 +113,7 @@ public class BigQueryConnector implements Connector {
     @Override
     public boolean addRecords(Iterable<SensorRecord> records, SensorNameProvider nameProvider) throws Exception {
 
-        final TableId rawDataTableId = bigQuery.getTable(DATASET_NAME,SENSOR_RECORDS_TABLE_NAME).getTableId();
+        final TableId rawDataTableId = bigQuery.getTable(dataSetName, SENSOR_RECORDS_TABLE_NAME).getTableId();
 
         logger.info("Got table id '" + rawDataTableId + "'");
 
@@ -150,7 +151,7 @@ public class BigQueryConnector implements Connector {
 
         logger.info("Performing aggregations");
 
-        final TableId aggregatedDataTableId = bigQuery.getTable(DATASET_NAME,AGGREGATED_SENSOR_RECORDS_TABLE_NAME).getTableId();
+        final TableId aggregatedDataTableId = bigQuery.getTable(dataSetName, AGGREGATED_SENSOR_RECORDS_TABLE_NAME).getTableId();
         for (final String sensorId : getAllSensorIds()) {
             for (final AggregationScope scope : AggregationScope.values()) {
                 logger.info("Performing '" + scope.name() + "' aggregation for sensor '" + sensorId + "'");
@@ -183,7 +184,7 @@ public class BigQueryConnector implements Connector {
             }
         }
 
-        final TableId heatingLevelTableId = bigQuery.getTable(DATASET_NAME, HEATING_LEVEL_TABLE_NAME).getTableId();
+        final TableId heatingLevelTableId = bigQuery.getTable(dataSetName, HEATING_LEVEL_TABLE_NAME).getTableId();
         for (final Iterable<HeatingLevelRecord> heatingLevelRecords : Iterables.partition(getAggregatedHeatingLevelValues(), 10000)) {
             final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(heatingLevelTableId);
 
@@ -234,9 +235,13 @@ public class BigQueryConnector implements Connector {
         };
     }*/
 
+    private String getQueryForDataSet(final String query) {
+        return StringUtils.replace(query, DATASET_NAME_PARAMETER, dataSetName);
+    }
+
     private Iterable<HeatingLevelRecord> getAggregatedHeatingLevelValues() {
         final LocalDateTime checkPointValue = getHeatingLevelCheckPoint();
-        final String query = StringUtils.replace(GET_HEATING_LEARNING_DATA, DATETIME_QUERY_PARAMETER, checkPointValue.toString());
+        final String query = StringUtils.replace(getQueryForDataSet(GET_WITHOUT_DATASET_HEATING_LEARNING_DATA), DATETIME_QUERY_PARAMETER, checkPointValue.toString());
 
         final List<HeatingLevelRecord> result = Lists.newArrayList();
 
@@ -355,7 +360,7 @@ public class BigQueryConnector implements Connector {
     private Iterable<SensorRecord> getRawDataForAggregation(final String sensorId, final LocalDateTime from) {
         final ImmutableList.Builder<SensorRecord> result = ImmutableList.builder();
         final String query = StringUtils.replaceEach(
-                GET_SENSOR_RAW_DATA_QUERY,
+                getQueryForDataSet(GET_WITHOUT_DATASET_SENSOR_RAW_DATA_QUERY),
                 new String[] {SENSOR_ID_QUERY_PARAMETER, DATETIME_QUERY_PARAMETER},
                 new String[] {sensorId, from.toString()});
         logger.info("Running query '" + query + "'");
@@ -376,7 +381,7 @@ public class BigQueryConnector implements Connector {
 
     private LocalDateTime getAggregatedCheckPoint(final String sensorId, final AggregationScope aggregationScope) {
         final String query = StringUtils.replaceEach(
-                GET_AGGREGATED_CHECKPOINT_QUERY,
+                getQueryForDataSet(GET_WITHOUT_DATASET_AGGREGATED_CHECKPOINT_QUERY),
                 new String[] {SENSOR_ID_QUERY_PARAMETER, AGGREGATION_SCOPE_PARAMETER},
                 new String[] {sensorId, "" + aggregationScope.id()});
         logger.debug("Running query '" + query + "'");
@@ -400,7 +405,7 @@ public class BigQueryConnector implements Connector {
     }
 
     private LocalDateTime getHeatingLevelCheckPoint() {
-        final String query = GET_HEATING_LEVEL_CHECKPOINT;
+        final String query = getQueryForDataSet(GET_WITHOUT_DATASET_HEATING_LEVEL_CHECKPOINT);
         logger.debug("Running query '" + query + "'");
         final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
         logger.debug("Iterating on query result '" + query + "'");
@@ -423,7 +428,7 @@ public class BigQueryConnector implements Connector {
 
     private Iterable<String> getAllSensorIds() {
         final ImmutableList.Builder<String> result = ImmutableList.builder();
-        final String query = GET_SENSOR_IDS_QUERY;
+        final String query = getQueryForDataSet(GET_WITHOUT_DATASET_SENSOR_IDS_QUERY);
         logger.debug("Running query '" + query + "'");
         final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
         logger.debug("Iterating on query result '" + query + "'");
@@ -449,7 +454,7 @@ public class BigQueryConnector implements Connector {
     }
 
     public Optional<LocalDateTime> getRawCheckpointValue(String sensorId) {
-        final String query = StringUtils.replace(GET_CHECKPOINT_QUERY, SENSOR_ID_QUERY_PARAMETER, sensorId);
+        final String query = StringUtils.replace(getQueryForDataSet(GET_WITHOUT_DATASET_CHECKPOINT_QUERY), SENSOR_ID_QUERY_PARAMETER, sensorId);
         logger.debug("Running query '" + query + "'");
         final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
         logger.debug("Iterating on query result '" + query + "'");

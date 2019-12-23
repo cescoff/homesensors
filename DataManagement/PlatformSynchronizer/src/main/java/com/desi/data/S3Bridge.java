@@ -225,7 +225,9 @@ public class S3Bridge {
                 final String dateTimeString = elements[1] + " " + elements[2];
                 final float value = new Double(StringUtils.remove(elements[3], "C=")).floatValue();
 
-                result.add(new TemperatureRecord(parseDateTime(dateTimeString), value, sensorUUID));
+                if (value != 85.0) {
+                    result.add(new TemperatureRecord(parseDateTime(dateTimeString), value, sensorUUID));
+                }
             } else {
                 throw new Exception("UNPARSABLE LINE '" + line + "'");
             }

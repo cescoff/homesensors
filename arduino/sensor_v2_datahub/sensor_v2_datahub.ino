@@ -32,7 +32,7 @@ const char GET_REPORT_URI[] = "/report";
 const char GET_PING_URI[] = "/ping";
 
 // Set the static IP address to use if the DHCP fails to assign
-IPAddress ip(192, 168, 0, 9);
+IPAddress ip(192, 168, 8, 250);
 IPAddress myDns(8, 8, 8, 8);
 
 // Initialize the Ethernet client library
@@ -45,7 +45,10 @@ unsigned long beginMicros, endMicros;
 unsigned long byteCount = 0;
 bool printWebData = true;  // set to false for better speed measurement
 
-unsigned long lastPingMillis = 0;
+unsigned long lastPingMillis = millis();
+unsigned long lastReconnectMillis = millis();
+
+int connectionFailureCount = 0;
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -88,6 +91,11 @@ void setup() {
 }
 
 void loop() {
+  if (connectionFailureCount > 5) {
+    connectEthernet();
+    connectionFailureCount = 0;
+  }
+
   if (reciever.available()) {
   
 /*    Serial.print("reciever.getReceivedValue()::");
@@ -119,7 +127,35 @@ void loop() {
 
   if ((millis() - lastPingMillis) >= 60000) {
     performPing();
+    delay(1000);
     lastPingMillis = millis();
+  }
+
+  if ((millis() - lastReconnectMillis) >= 1200000) {
+    connectEthernet();
+    lastReconnectMillis = millis();
+  }
+}
+
+void connectEthernet() {
+  Serial.println(F("Initialize Ethernet with DHCP:"));
+  if (Ethernet.begin(mac) == 0) {
+    Serial.println(F("Failed to configure Ethernet using DHCP"));
+    // Check for Ethernet hardware present
+    if (Ethernet.hardwareStatus() == EthernetNoHardware) {
+      Serial.println(F("Ethernet shield was not found.  Sorry, can't run without hardware. :("));
+      while (true) {
+        delay(1); // do nothing, no point running without Ethernet hardware
+      }
+    }
+    if (Ethernet.linkStatus() == LinkOFF) {
+      Serial.println(F("Ethernet cable is not connected."));
+    }
+    // try to congifure using IP address instead of DHCP:
+    Ethernet.begin(mac, ip, myDns);
+  } else {
+    Serial.print(F("  DHCP assigned IP "));
+    Serial.println(Ethernet.localIP());
   }
 }
 
@@ -130,34 +166,48 @@ void performPing() {
   Serial.print(GET_REPORT_SERVER);
   Serial.println(F("..."));
 
+  
+  int httpFailureCount = 0;
   // if you get a connection, report back via serial:
-  if (client.connect(GET_REPORT_SERVER, 80)) {
-    Serial.print(F("connected to "));
-    Serial.println(client.remoteIP());
-    // Make a HTTP request:
-    client.print(F("GET "));
-    client.print(GET_PING_URI);
-    client.print(F("?f="));
-    client.print(FOLDER);
-    client.println(F(" HTTP/1.1"));
-    client.print(F("Host: "));
-    client.println(GET_REPORT_SERVER);
-    client.println(F("Accept: */*"));
-    client.println(F("User-Agent: ArduinoClient/GeangesV2"));
-    client.println(F("Connection: close\r\n"));
-    client.println();
-    client.println();
-  } else {
+  while (client.connect(GET_REPORT_SERVER, 80) != 1) {
+    if (httpFailureCount >= 60) {
+      client.flush();
+      client.stop();
+      connectionFailureCount++;
+      return;
+    }
     // if you didn't get a connection to the server:
     Serial.println(F("connection failed"));
+    httpFailureCount++;
+    delay(1000);
   }
+
+  Serial.print(F("connected to "));
+  Serial.println(client.remoteIP());
+  // Make a HTTP request:
+  client.print(F("GET "));
+  client.print(GET_PING_URI);
+  client.print(F("?f="));
+  client.print(FOLDER);
+  client.println(F(" HTTP/1.1"));
+  client.print(F("Host: "));
+  client.println(GET_REPORT_SERVER);
+  client.println(F("Accept: */*"));
+  client.println(F("User-Agent: ArduinoClient/GeangesV2"));
+  client.println(F("Connection: close\r\n"));
+  client.println();
+  client.println();
 
   int connectLoop=0;
   while(client.connected()) {
-    if (connectLoop > 30000) {
+    if (connectLoop > 3000) {
       Serial.println(F("TIMEOUT"));
+      client.flush();
       client.stop();
+      connectionFailureCount++;
+      return;
     }
+    delay(10);
     int len = client.available();
     while (client.available()) {
 //      Serial.println(F("Read packet"));
@@ -193,38 +243,52 @@ void sendData(String sensorId, float value) {
   Serial.print(GET_REPORT_SERVER);
   Serial.println("...");
 
+  int httpFailureCount = 0;
   // if you get a connection, report back via serial:
-  if (client.connect(GET_REPORT_SERVER, 80)) {
-    Serial.print(F("connected to "));
-    Serial.println(client.remoteIP());
-    // Make a HTTP request:
-    client.print(F("GET "));
-    client.print(GET_REPORT_URI);
-    client.print(F("?f="));
-    client.print(FOLDER);
-    client.print(F("&s="));
-    client.print(sensorId);
-    client.print(F("&v="));
-    client.print(value);
-    client.println(F(" HTTP/1.1"));
-    client.print(F("Host: "));
-    client.println(GET_REPORT_SERVER);
-    client.println(F("Accept: */*"));
-    client.println(F("User-Agent: ArduinoClient/GeangesV2"));
-    client.println(F("Connection: close\r\n"));
-    client.println();
-    client.println();
-  } else {
+  while (client.connect(GET_REPORT_SERVER, 80) != 1) {
+    if (httpFailureCount >= 60) {
+      client.flush();
+      client.stop();
+      connectionFailureCount++;
+      return;
+    }
     // if you didn't get a connection to the server:
     Serial.println(F("connection failed"));
+    httpFailureCount++;
+    delay(1000);
   }
-  
+
+
+  Serial.print(F("connected to "));
+  Serial.println(client.remoteIP());
+  // Make a HTTP request:
+  client.print(F("GET "));
+  client.print(GET_REPORT_URI);
+  client.print(F("?f="));
+  client.print(FOLDER);
+  client.print(F("&s="));
+  client.print(sensorId);
+  client.print(F("&v="));
+  client.print(value);
+  client.println(F(" HTTP/1.1"));
+  client.print(F("Host: "));
+  client.println(GET_REPORT_SERVER);
+  client.println(F("Accept: */*"));
+  client.println(F("User-Agent: ArduinoClient/GeangesV2"));
+  client.println(F("Connection: close\r\n"));
+  client.println();
+  client.println();
+
   int connectLoop=0;
   while(client.connected()) {
-    if (connectLoop > 30000) {
+    if (connectLoop > 3000) {
       Serial.println(F("TIMEOUT"));
+      client.flush();
       client.stop();
+      connectionFailureCount++;
+      return;
     }
+    delay(10);
     int len = client.available();
     while (client.available()) {
 //      Serial.println(F("Read packet"));

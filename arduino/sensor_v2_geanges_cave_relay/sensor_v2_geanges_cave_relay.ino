@@ -1,5 +1,7 @@
 #include <RCSwitch.h>
 #include <SPI.h> 
+#include <RF24.h> 
+#include <printf.h>
 
 RCSwitch reciever = RCSwitch();
 RCSwitch transmitter = RCSwitch();
@@ -7,6 +9,11 @@ RCSwitch transmitter = RCSwitch();
 const bool DEBUG = false;
 
 bool printed = false;
+
+// RF24
+RF24 radio(8, 7); // CE, CSN
+const byte address[6] = "00001";
+
 
 void setup() {
   // Open serial communications and wait for port to open:
@@ -16,9 +23,23 @@ void setup() {
   transmitter.enableTransmit(10);
 
 
+  radio.begin();
+  radio.openWritingPipe(address);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.stopListening();
+
+  printf_begin();
+  radio.printDetails();
+
   // send an intro:
   Serial.println("Sensor V2 Geange Cave Relay");
   Serial.println();
+  if (radio.isChipConnected()) {
+    Serial.println("Radio HARDWARE connected");
+  } else {
+    Serial.println("Radio HARDWARE is NOT connected !!!!!!");
+  }
+
 }
 
 void loop() {
@@ -49,7 +70,20 @@ void loop() {
 
 
       num = encodeMessage(sensorId - 8, messageId, value);
-      transmitter.send(num, 32);
+      
+      transmitter.send(&num, 32);
+
+      if (radio.isChipConnected()) {
+        if(radio.write(&num, sizeof(unsigned long))) {
+          Serial.print("Message ");
+          Serial.print(num);
+          Serial.println(" sent");
+        } else {
+          Serial.println("Failed to sent message");
+        }
+      } else {
+        Serial.println("Message will not be sent by NF24, because hardware is NOT connected");
+      }
     } else {
       Serial.println("Ignoring message");
       Serial.print(sensorId);

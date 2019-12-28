@@ -3,6 +3,8 @@
 #include <OneWire.h>
 #include <DallasTemperature.h>
 #include <Wire.h> 
+#include <RF24.h> 
+#include <printf.h>
 
 #define ONE_WIRE_BUS1 5
 
@@ -19,6 +21,12 @@ const bool DEBUG = false;
 
 unsigned long lastPingMillis = 0;
 
+// NRF24
+RF24 radio(8, 7); // CE, CSN
+const byte address[6] = "00001";
+
+
+
 void setup() {
   // Open serial communications and wait for port to open:
   Serial.begin(9600);
@@ -26,10 +34,22 @@ void setup() {
   reciever.enableReceive(0);  // Receiver on interrupt 0 => that is pin #2
   transmitter.enableTransmit(10);
 
+  radio.begin();
+  radio.openReadingPipe(0, address);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.startListening();
+
+  printf_begin();
+  radio.printDetails();
 
   // send an intro:
   Serial.println("Sensor V2 Geange Home Relay");
   Serial.println();
+  if (radio.isChipConnected()) {
+    Serial.println("Radio HARDWARE connected");
+  } else {
+    Serial.println("Radio HARDWARE is NOT connected !!!!!!");
+  }
 }
 
 void loop() {
@@ -52,6 +72,31 @@ void loop() {
     transmitter.send(message, 32);
   
     lastPingMillis = millis();
+  }
+
+  if (radio.available()) {
+    unsigned long num;
+    radio.read(&num, sizeof(unsigned long));
+    Serial.print("radio.read()::");
+    Serial.println(num);
+
+    String message = longToMessage(num);
+    Serial.println( message );
+    int sensorId = decodeSensorId(message);
+    int messageId = decodeMessageId(message);
+    float value = decodeValue(message);
+
+    if (sensorId == 8 || sensorId == 7) {
+      Serial.println("Forwarding message");
+      Serial.print(sensorId);
+      Serial.print(";");
+      Serial.print(messageId);
+      Serial.print(";");
+      Serial.println(value);
+
+      num = encodeMessage(sensorId - 6, messageId, value);
+      transmitter.send(num, 32);
+    }
   }
 
   if (reciever.available()) {

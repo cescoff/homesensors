@@ -60,7 +60,7 @@ public class ImageAnnotator {
 
     private static final String REGION = "us-east-1";
 
-    private final String s3BucketName;
+    private final List<String> s3BucketNames;
 
     private final File credentialsFile;
 
@@ -76,8 +76,8 @@ public class ImageAnnotator {
 
     private VisionConnector visionConnector = null;
 
-    public ImageAnnotator(String s3BucketName, File credentialsFile, PlatformClientId clientId) {
-        this.s3BucketName = s3BucketName;
+    public ImageAnnotator(List<String> s3BucketNames, File credentialsFile, PlatformClientId clientId) {
+        this.s3BucketNames = s3BucketNames;
         this.credentialsFile = credentialsFile;
         this.clientId = clientId;
     }
@@ -91,38 +91,41 @@ public class ImageAnnotator {
                 withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessKey, secretKey))).
                 withRegion(REGION).
                 build();
-        final ListObjectsV2Result result = s3.listObjectsV2(s3BucketName);
 
-        final List<S3ObjectSummary> objects = result.getObjectSummaries();
+        for (final String s3BucketName : s3BucketNames) {
+            final ListObjectsV2Result result = s3.listObjectsV2(s3BucketName);
 
-        for (S3ObjectSummary os : objects) {
-            try {
-                final Optional<LocalDateTime> guessedFileDateTime = guessDateTimeFromKey(os.getKey());
+            final List<S3ObjectSummary> objects = result.getObjectSummaries();
 
-                if (StringUtils.contains(os.getKey(), ".jpg") && (!guessedFileDateTime.isPresent() || guessedFileDateTime.get().isAfter(checkPoint))) {
-                    S3Object fullObject = s3.getObject(new GetObjectRequest(os.getBucketName(), os.getKey()));
-
-                    if (new LocalDateTime(fullObject.getObjectMetadata().getLastModified()).isAfter(checkPoint)) {
-                        logger.info("Parsing content for object s3://" + os.getBucketName() + "/" + os.getKey());
-                        final Optional<AnnotatedImage> annotation = annotateImage(fullObject.getObjectContent(), os.getKey(), checkPoint);
-                        if (annotation.isPresent()) {
-                            annotatedImages.add(annotation.get());
-                        }
-                        //records.addAll(parseContent(fullObject.getObjectContent()));
-                    }
-                }
-            } catch (Exception e) {
-                logger.error("Failed to parse file s3://" + os.getBucketName() + "/" + os.getKey() + ": " + e.getMessage(), e);
-            }
-            if (annotatedImages.size() > 0 && (annotatedImages.size() % 5) == 0) {
-                final File outputFile = new File("temp-image-annotations.xml");
+            for (S3ObjectSummary os : objects) {
                 try {
-                    final AnnotatedImageBatch batch = new AnnotatedImageBatch();
-                    batch.getAnnotatedImages().addAll(annotatedImages);
-                    JAXBUtils.marshal(batch, outputFile, true);
-                    logger.info("Annotations saved into file '" + outputFile.getAbsolutePath() + "'");
-                } catch (Throwable t) {
-                    logger.error("Cannot marshall image annotations", t);
+                    final Optional<LocalDateTime> guessedFileDateTime = guessDateTimeFromKey(os.getKey());
+
+                    if (acceptFileName(os.getKey()) && (!guessedFileDateTime.isPresent() || guessedFileDateTime.get().isAfter(checkPoint))) {
+                        S3Object fullObject = s3.getObject(new GetObjectRequest(os.getBucketName(), os.getKey()));
+
+                        if (new LocalDateTime(fullObject.getObjectMetadata().getLastModified()).isAfter(checkPoint)) {
+                            logger.info("Parsing content for object s3://" + os.getBucketName() + "/" + os.getKey());
+                            final Optional<AnnotatedImage> annotation = annotateImage(fullObject.getObjectContent(), os.getKey(), checkPoint);
+                            if (annotation.isPresent()) {
+                                annotatedImages.add(annotation.get());
+                            }
+                            //records.addAll(parseContent(fullObject.getObjectContent()));
+                        }
+                    }
+                } catch (Exception e) {
+                    logger.error("Failed to parse file s3://" + os.getBucketName() + "/" + os.getKey() + ": " + e.getMessage(), e);
+                }
+                if (annotatedImages.size() > 0 && (annotatedImages.size() % 5) == 0) {
+                    final File outputFile = new File("temp-image-annotations.xml");
+                    try {
+                        final AnnotatedImageBatch batch = new AnnotatedImageBatch();
+                        batch.getAnnotatedImages().addAll(annotatedImages);
+                        JAXBUtils.marshal(batch, outputFile, true);
+                        logger.info("Annotations saved into file '" + outputFile.getAbsolutePath() + "'");
+                    } catch (Throwable t) {
+                        logger.error("Cannot marshall image annotations", t);
+                    }
                 }
             }
         }
@@ -132,6 +135,11 @@ public class ImageAnnotator {
 
 
         return ImmutableList.copyOf(annotatedImages);
+    }
+
+    private boolean acceptFileName(final String key) {
+        return StringUtils.containsIgnoreCase(key, ".jpg")
+                || StringUtils.containsIgnoreCase(key, ".jpeg");
     }
 
     private Optional<LocalDateTime> guessDateTimeFromKey(final String key) {
@@ -286,7 +294,7 @@ public class ImageAnnotator {
                 System.exit(4);
             }*/
 
-            final Iterable<AnnotatedImage> annotatedImages = new ImageAnnotator("desi-counters-images", new File(args[0]), PlatformClientId.S3Bridge).annotate(LocalDateTime.parse("2010-1-1T00:00:00"));
+            final Iterable<AnnotatedImage> annotatedImages = new ImageAnnotator(Lists.newArrayList("desi-legacy-counters-images", "desi-counters-images"), new File(args[0]), PlatformClientId.S3Bridge).annotate(LocalDateTime.parse("2010-1-1T00:00:00"));
             final AnnotatedImageBatch batch = new AnnotatedImageBatch();
             Iterables.addAll(batch.getAnnotatedImages(), annotatedImages);
 

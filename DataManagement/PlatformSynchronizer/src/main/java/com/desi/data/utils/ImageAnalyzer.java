@@ -5,15 +5,13 @@ import com.desi.data.SensorRecord;
 import com.desi.data.SensorUnit;
 import com.desi.data.bean.*;
 import com.desi.data.config.CarConfiguration;
+import com.desi.data.config.FuelOCRParser;
 import com.google.common.base.Function;
 import com.google.common.base.Joiner;
-import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Lists;
-import com.google.common.collect.Ordering;
+import com.google.common.collect.*;
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang.SystemUtils;
 import org.apache.log4j.PropertyConfigurator;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.joda.time.LocalDateTime;
@@ -25,11 +23,10 @@ import javax.xml.bind.JAXBException;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
-import java.time.format.DateTimeFormatter;
 import java.util.Date;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
-import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public abstract class ImageAnalyzer {
@@ -39,12 +36,10 @@ public abstract class ImageAnalyzer {
 
     private static final String GASOLINE_PRICE_UUID = "9762b419-c5bd-4285-bce9-496485e3b710";
 
-    private static final Pattern CAR_ODOMETER_PARSER = Pattern.compile("([0-9]{6})");
     private static final Pattern GASOLINE_VOLUME_PARSER = Pattern.compile("([0-9]{1,2}[,\\.]+[0-9]{0,2})");
 
     private static final Pattern NUMBER_TEXT_PATTERN = Pattern.compile("([\\-]*[0-9]+[\\.\\,]{0,1}[0-9]*)");
 
-    private static final String[] PEUGEOT_305_ODOMETER_MARKERS = {"PJ74", "JAEGER"};
     private static final String[] GASOLINE_METER_MARKERS = {"LITRE", "VOLUME"};
 
 
@@ -52,284 +47,129 @@ public abstract class ImageAnalyzer {
 
     private ImageAnalyzer() {}
 
-    private static boolean containsAnyIgnoreCase(final String text, final String[] values) {
-        for (final String value : values) {
-            if (StringUtils.containsIgnoreCase(text, value)) {
-                return true;
-            }
-        }
-        return false;
-    }
+    public static Iterable<SensorRecord> getFuelStatistics(final Iterable<AnnotatedImage> images) {
+        final List<SensorRecord> result = Lists.newArrayList();
+        for (final CarConfiguration carConfiguration : CarConfigurationHelper.all()) {
+            final FuelOCRParser parser = new FuelOCRParser(carConfiguration);
+            final Iterable<VehicleImageData> fuelStatistics = parser.analyzeImages(images);
 
-    public static Iterable<SensorRecord> analyze(final AnnotatedImage image) {
-        final ImmutableList.Builder<SensorRecord> result = ImmutableList.builder();
-        boolean carOdometerImage = false;
-        boolean gasolineVolumeImage = false;
-        for (final String text : image.getTextElements()) {
-            if (containsAnyIgnoreCase(text, PEUGEOT_305_ODOMETER_MARKERS)) {
-                carOdometerImage = true;
-            }
-            if (containsAnyIgnoreCase(text, GASOLINE_METER_MARKERS)) {
-                gasolineVolumeImage = true;
-            }
-        }
-        if (carOdometerImage) {
-            logger.info("Car odometer found");
-            float odometerValue = 0;
-            for (final String text : image.getTextElements()) {
-                final Matcher matcher = CAR_ODOMETER_PARSER.matcher(text);
-                if (matcher.find()) {
-                    float value = new Float(Integer.parseInt(StringUtils.trim(matcher.group(1))));
-                    if (odometerValue <= 0) {
-                        logger.info("Found car odometer value : " + matcher.group(1));
-                        result.add(OdometerRecord.builder().withImage(image).withUUID(CarConfigurationHelper.getPeugeot305().getOdometerUUID()).withValue(value).build());
-                        odometerValue = value;
+            final List<VehicleImageData> odometerValues = Ordering.natural().reverse().onResultOf(new Function<VehicleImageData, Date>() {
+                @Nullable
+                @Override
+                public Date apply(@Nullable VehicleImageData fuelStatistics) {
+                    return fuelStatistics.getDateTaken().toDate();
+                }
+            }).sortedCopy(Iterables.filter(fuelStatistics, new Predicate<VehicleImageData>() {
+                @Override
+                public boolean apply(@Nullable VehicleImageData fuelStatistics) {
+                    return fuelStatistics.hasOdometerValue();
+                }
+            }));
+
+            final List<VehicleImageData> fuelValues = Ordering.natural().reverse().onResultOf(new Function<VehicleImageData, Date>() {
+                @Nullable
+                @Override
+                public Date apply(@Nullable VehicleImageData fuelStatistics) {
+                    return fuelStatistics.getDateTaken().toDate();
+                }
+            }).sortedCopy(Iterables.filter(fuelStatistics, new Predicate<VehicleImageData>() {
+                @Override
+                public boolean apply(@Nullable VehicleImageData fuelStatistics) {
+                    return fuelStatistics.hasVolume();
+                }
+            }));
+
+            final List<VehicleImageData> otherValues = Ordering.natural().reverse().onResultOf(new Function<VehicleImageData, Date>() {
+                @Nullable
+                @Override
+                public Date apply(@Nullable VehicleImageData fuelStatistics) {
+                    return fuelStatistics.getDateTaken().toDate();
+                }
+            }).sortedCopy(Iterables.filter(fuelStatistics, new Predicate<VehicleImageData>() {
+                @Override
+                public boolean apply(@Nullable VehicleImageData fuelStatistics) {
+                    return !fuelStatistics.hasVolume() && !fuelStatistics.hasOdometerValue()
+                            && !fuelStatistics.hasPrice() && !fuelStatistics.hasPricePerLitre();
+                }
+            }));
+
+            final Map<VehicleImageData, List<VehicleImageData>> fuelEvents = Maps.newHashMap();
+            VehicleImageData currentOdometerValue = null;
+            List<VehicleImageData> currentBuffer = Lists.newArrayList();
+            for (final VehicleImageData fuelValue : fuelValues) {
+                final Iterable<VehicleImageData> odometers = Iterables.filter(odometerValues, ConcomittentDateFilter(fuelValue));
+                if (!Iterables.isEmpty(odometers)) {
+                    if (currentOdometerValue != null) {
+                        fuelEvents.put(currentOdometerValue, currentBuffer);
+                        currentBuffer = Lists.newArrayList();
                     }
+                    currentOdometerValue = Iterables.getFirst(odometers, null);
                 }
+                currentBuffer.add(fuelValue);
             }
-            if (odometerValue <= 0) {
-                result.add(OdometerRecord.builder().withImage(image).withUUID(CarConfigurationHelper.getPeugeot305().getOdometerUUID()).withUnreadable().build());
-            }
-            if (StringUtils.isNotEmpty(image.getLatitude()) && StringUtils.isNotEmpty(image.getLongitude())) {
-                result.add(new GPSLatitudeSensorRecord(CarConfigurationHelper.getPeugeot305().getGPSUUID(), image.getDateTaken(), image.getLatitudeRef(), image.getLatitude()));
-                result.add(new GPSLongitudeSensorRecord(CarConfigurationHelper.getPeugeot305().getGPSUUID(), image.getDateTaken(), image.getLongitudeRef(), image.getLongitude()));
-            }
-        }
-        if (gasolineVolumeImage) {
-            logger.info("Gasoline volume found");
-            float volume = 0;
-            float fullPrice = 0;
-            float gasolinePrice = 0;
-            SensorUnit currency = SensorUnit.EURO;
-            for (int position = 0; position < Iterables.size(image.getTextElements()); position++) {
-                final String text = Iterables.get(image.getTextElements(), position);
-                if (SensorUnit.getCurrency(text).isPresent()) {
-                    currency = SensorUnit.getCurrency(text).get();
-                }
-                if (!StringUtils.contains(text, "\n")) {
-                    if ((isNumber(text) && StringUtils.containsIgnoreCase(text, "Litre")) || (isNumber(text) && hasNextToken(image.getTextElements(), "Litre", position))) {
-                        final Matcher matcher = GASOLINE_VOLUME_PARSER.matcher(Iterables.get(image.getTextElements(), position));
+            fuelEvents.put(currentOdometerValue, currentBuffer);
 
-                        if (matcher.find()) {
-                            final String gasolineVolumeValue = StringUtils.replace(matcher.group(1), ",", ".");
-                            if (volume <= 0) {
-                                volume = Float.parseFloat(gasolineVolumeValue);
-                                logger.info("Found gasoline volume value : '" + gasolineVolumeValue);
-                                result.add(GasolineVolumeRecord.builder().withImage(image).withUUID(UNKNOWN_GASOLINE_METER_UUID).withValue(volume).build());
-                            } else {
-                                float value = Float.parseFloat(gasolineVolumeValue);
-                                if (value > volume) {
-                                    gasolinePrice = value / volume;
-                                }
+            for (int index = 0; index < odometerValues.size(); index++) {
+                final VehicleImageData odometerValue = odometerValues.get(index);
+                result.add(new OdometerRecord(odometerValue.getOdometerValue(), carConfiguration.getOdometerUUID(), odometerValue.getDateTaken(), odometerValue.getFileName()));
+                if (fuelEvents.containsKey(odometerValue) && index < (odometerValues.size() - 1)) {
+                    final VehicleImageData previousValue = odometerValues.get(index + 1);;
+                    final float distance = odometerValue.getOdometerValue() - previousValue.getOdometerValue();
+
+                    if (distance > 0) {
+                        float fullVolume = 0;
+                        float priceSum = 0;
+                        float volumeSum = 0;
+
+                        for (final VehicleImageData fuelEvent : fuelEvents.get(odometerValue)) {
+                            if (fuelEvent.hasPricePerLitre()) {
+                                result.add(new PriceRecord(odometerValue.getDateTaken(), carConfiguration.getDistanceUUID(), fuelEvent.getPricePerLitre(), SensorUnit.EURO));
                             }
-                        } else {
-                            final Matcher fakeIntMatcher = Pattern.compile("([0-9]{4})").matcher(text);
-                            if (fakeIntMatcher.find()) {
-                                final String gasolineVolumeValue = StringUtils.substring(fakeIntMatcher.group(1), 0, 2) + "." + StringUtils.substring(fakeIntMatcher.group(1), 2);
-                                if (volume <= 0) {
-                                    volume = Float.parseFloat(gasolineVolumeValue);
-                                    logger.info("Found gasoline volume value : " + gasolineVolumeValue);
-                                    result.add(GasolineVolumeRecord.builder().withImage(image).withUUID(UNKNOWN_GASOLINE_METER_UUID).withValue(volume).build());
-                                } else {
-                                    float value = Float.parseFloat(gasolineVolumeValue);
-                                    if (value > volume) {
-                                        gasolinePrice = value / volume;
-                                    } else if (isValidGasolinePrice(value)) {
-                                        gasolinePrice = value;
-                                    }
-                                }
+
+                            fullVolume += fuelEvent.getVolume();
+                            if (fuelEvent.getPricePerLitre() > 0) {
+                                priceSum += fuelEvent.getVolume() * fuelEvent.getPricePerLitre();
+                                volumeSum += fuelEvent.getVolume();
                             }
                         }
-                    } else if (isNumber(text)) {
-                        final Matcher numberMatcher = NUMBER_TEXT_PATTERN.matcher(text);
-                        if (numberMatcher.find()) {
-                            float value = Float.parseFloat(StringUtils.replace(numberMatcher.group(1), ",", "."));
-                            if (isValidGasolinePrice(value)) gasolinePrice = value;
-                            else if (value < 150) fullPrice = value;
-                        }
-                    } else {
-                        logger.info("Nothing can be done there");
-                    }
-                } else {
-                    for (final String line : StringUtils.split(text, "\n")) {
-                        final Matcher matcher = GASOLINE_VOLUME_PARSER.matcher(line);
-                        if (matcher.find() && StringUtils.containsIgnoreCase(line, "Litre") && volume <= 0) {
-                            final String gasolineVolumeValue = StringUtils.replace(matcher.group(1), ",", ".");
-                            volume = Float.parseFloat(gasolineVolumeValue);
-                            logger.info("Found gasoline volume value : '" + gasolineVolumeValue);
-                            result.add(GasolineVolumeRecord.builder().withImage(image).withUUID(UNKNOWN_GASOLINE_METER_UUID).withValue(volume).build());
-                        }
-                    }
-                }
-            }
-            if (volume <= 0) {
-                List<Float> values = Lists.newArrayList();
-                for (final String text : image.getTextElements()) {
-                    if (!StringUtils.contains(text, "\n")) {
-                        final Matcher volumeMatcher = GASOLINE_VOLUME_PARSER.matcher(text);
-                        if (volumeMatcher.find()) {
-                            float value = Float.parseFloat(StringUtils.replace(volumeMatcher.group(1), ",", "."));
-                            if (value > 0 && value < 200) {
-                                values.add(value);
-                            }
-                        } else {
-                            final Matcher fakeIntMatcher = Pattern.compile("([0-9]+)").matcher(text);
-                            // Fake int is when comma or dot is not read by OCR
-                            if (fakeIntMatcher.find() && fakeIntMatcher.group(1).length() == 4) {
-                                final String gasolineVolumeValue = StringUtils.substring(fakeIntMatcher.group(1), 0, 2) + "." + StringUtils.substring(fakeIntMatcher.group(1), 2);
-                                float value = Float.parseFloat(gasolineVolumeValue);
-                                if (value > 0 && value < 200) {
-                                    values.add(value);
-                                }
-                            }
-                        }
-                    }
-                }
-                values = Ordering.natural().reverse().sortedCopy(values);
-                if (values.size() > 1) {
-                    fullPrice = values.get(0);
-                    volume = values.get(1);
-                    result.add(GasolineVolumeRecord.builder().withImage(image).withUUID(UNKNOWN_GASOLINE_METER_UUID).withValue(volume).build());
-                    if (fullPrice > volume) {
-                        gasolinePrice = fullPrice / volume;
-                        if (isValidGasolinePrice(gasolinePrice)) {
-                            result.add(new PriceRecord(image.getDateTaken(), GASOLINE_PRICE_UUID, gasolinePrice, currency));
-                        }
-                    }
-                } else if (values.size() == 1) {
-                    result.add(GasolineVolumeRecord.builder().withImage(image).withUUID(UNKNOWN_GASOLINE_METER_UUID).withValue(values.get(0)).build());
-                } else {
-                    logger.info("Unreadable gasoline volume value : '" + Joiner.on("', '").join(image.getTextElements()) + "'");
-                    result.add(GasolineVolumeRecord.builder().withImage(image).withUUID(UNKNOWN_GASOLINE_METER_UUID).withUnreadable("Values are unclear too manu of them found (" + Joiner.on(", ").join(values) + ")").build());
-                }
-            } else if (isValidGasolinePrice(gasolinePrice)) {
-                result.add(new PriceRecord(image.getDateTaken(), GASOLINE_PRICE_UUID, gasolinePrice, currency));
-            } else if (fullPrice > volume) {
-                gasolinePrice = fullPrice / volume;
-                if (isValidGasolinePrice(gasolinePrice)) {
-                    result.add(new PriceRecord(image.getDateTaken(), GASOLINE_PRICE_UUID, gasolinePrice, currency));
-                }
-            }
-        }
-        return result.build();
-    }
+                        final float consumption = (100 * fullVolume) / distance;
+                        final float priceAvg;
+                        if (volumeSum > 0) priceAvg = priceSum / volumeSum;
+                        else priceAvg = 0;
+                        result.add(new DistanceRecord(carConfiguration.getDistanceUUID(), odometerValue.getDateTaken(), distance));
+                        result.add(new VehiclePosition(carConfiguration.getGPSUUID(), odometerValue.getDateTaken(), odometerValue.getLatitude(), odometerValue.getLongitude(), 0));
 
-    private static boolean isValidGasolinePrice(float value) {
-        return value > 1.4 && value < 1.8;
-    }
-
-    private static Iterable<SensorRecord> aggregateValues(final Iterable<SensorRecord> records) {
-        List<OdometerRecord> odometerValues = Lists.newArrayList();
-        List<GasolineVolumeRecord> gasolineVolumeRecords = Lists.newArrayList();
-        List<SensorRecord> validVolumeRecords = Lists.newArrayList();
-        List<SensorRecord> validGasolinePrices = Lists.newArrayList();
-        final List<SensorRecord> otherValues = Lists.newArrayList();
-        final List<SensorRecord> errors = Lists.newArrayList();
-
-        for (final SensorRecord sensorRecord : records) {
-            if (sensorRecord instanceof OdometerRecord) {
-                odometerValues.add((OdometerRecord) sensorRecord);
-            } else if (sensorRecord instanceof GasolineVolumeRecord) {
-                gasolineVolumeRecords.add((GasolineVolumeRecord) sensorRecord);
-/*            } else if (sensorRecord instanceof  PriceRecord){*/
-            } else {
-                otherValues.add(sensorRecord);
-            }
-        }
-
-        odometerValues = Ordering.natural().onResultOf(SENSOR_RECORD_SORTER).sortedCopy(odometerValues);
-        gasolineVolumeRecords = Ordering.natural().onResultOf(SENSOR_RECORD_SORTER).sortedCopy(gasolineVolumeRecords);
-
-        for (int odometerPosition = 0; odometerPosition < odometerValues.size(); odometerPosition++) {
-            OdometerRecord odometerRecord = odometerValues.get(odometerPosition);
-            GasolineVolumeRecord gasolineVolumeRecord = getAssociatedGasolineVolume(gasolineVolumeRecords, odometerRecord);
-            if (gasolineVolumeRecord != null) {
-                CarConfiguration carConfiguration = CarConfigurationHelper.resolveUUID(odometerRecord.getSensorUUID());
-                if (carConfiguration.isValidGasolineVolume(gasolineVolumeRecord.getValue())) {
-
-                    final OdometerRecord previousRecord = getPreviousOdometerValue(odometerValues, gasolineVolumeRecords, odometerPosition, odometerRecord);
-
-                    if (previousRecord != null) {
-                        float distanceBetween2Refuel = odometerRecord.getValue() - previousRecord.getValue();
-                        if (distanceBetween2Refuel > 0 && carConfiguration.isValidDistanceBetween2ReFuel(distanceBetween2Refuel)) {
-                            GasolineConsumptionRecord gasolineConsumptionRecord = new GasolineConsumptionRecord(odometerRecord.getDateTaken(), (100*gasolineVolumeRecord.getValue()) / distanceBetween2Refuel, carConfiguration.getGasolineAvgConsumptionUUID());
-                            if (carConfiguration.isValidGasolineConsumption(gasolineConsumptionRecord.getValue())) {
-                                otherValues.add(gasolineConsumptionRecord);
-                                validVolumeRecords.add(GasolineVolumeRecord.builder().withPreviousRecord(gasolineVolumeRecord).withUUID(carConfiguration.getGasolineMeterUUID()).build());
-                            } else {
-                                errors.add(GasolineVolumeRecord.builder().withPreviousRecord(gasolineVolumeRecord).withUUID(carConfiguration.getGasolineMeterUUID()).withUnreadable(
-                                        "Gasoline consumption is not acceptable for that vehicle "
-                                                + gasolineConsumptionRecord.getValue()
-                                                + "L/100, gasoline volume is "
-                                                + gasolineVolumeRecord.getValue()
-                                                + " and odometer value "
-                                                + odometerRecord.getValue()
-                                                + "km and distance "
-                                                + distanceBetween2Refuel).build());
-                            }
+                        if (carConfiguration.isValidGasolineConsumption(consumption)) {
+                            result.add(new VehicleFuelEvent(carConfiguration.getUUID(), odometerValue.getDateTaken(), odometerValue.getOdometerValue(), fullVolume, priceAvg, distance, consumption, odometerValue.getLatitude(), odometerValue.getLongitude()));
                         }
                     }
 
-                } else {
-                    errors.add(GasolineVolumeRecord.builder().withPreviousRecord(gasolineVolumeRecord).withUUID(carConfiguration.getGasolineMeterUUID()).withUnreadable("Gasoline volume is not acceptable for that vehicle " + gasolineVolumeRecord.getValue()).build());
                 }
             }
-        }
-        return ImmutableList.copyOf(
-                Ordering.natural().onResultOf(SENSOR_RECORD_SORTER).sortedCopy(
-                        ImmutableList.<SensorRecord>builder().addAll(odometerValues).addAll(validVolumeRecords).addAll(otherValues).addAll(errors).build()));
-    }
 
-    private static GasolineVolumeRecord getAssociatedGasolineVolume(final List<GasolineVolumeRecord> records, final OdometerRecord odometerRecord) {
-        for (int index = 0; index < records.size(); index++) {
-            if (odometerRecord.isAssociatedGasolineVolume(records.get(index))) {
-                return records.get(index);
+            for (final VehicleImageData vehicleImageData : otherValues) {
+                result.add(new VehiclePosition(carConfiguration.getGPSUUID(), vehicleImageData.getDateTaken(), vehicleImageData.getLatitude(), vehicleImageData.getLongitude(), 0));
             }
-        }
-        return null;
-    }
 
-    private static OdometerRecord getPreviousOdometerValue(final List<OdometerRecord> records, final List<GasolineVolumeRecord> gasolineVolumeRecords, final int position, final OdometerRecord odometerRecord) {
-        for (int index = 1; index <= position; index++) {
-            OdometerRecord candidate = records.get(position - index);
-            if (candidate.getSensorUUID().equals(odometerRecord.getSensorUUID()) && candidate.getDateTaken().isBefore(odometerRecord.getDateTaken().minusMinutes(10))) {
-                if (getAssociatedGasolineVolume(gasolineVolumeRecords, candidate) != null) {
-                    return candidate;
-                }
+        }
+        return Ordering.natural().onResultOf(new Function<SensorRecord, Date>() {
+            @Nullable
+            @Override
+            public Date apply(@Nullable SensorRecord sensorRecord) {
+                return sensorRecord.getDateTaken().toDate();
             }
-        }
-        return null;
+        }).sortedCopy(result);
     }
 
-    private static Function<SensorRecord, Date> SENSOR_RECORD_SORTER = new Function<SensorRecord, Date>() {
-        @Nullable
-        @Override
-        public Date apply(@Nullable SensorRecord sensorRecord) {
-            return sensorRecord.getDateTaken().toDate();
-        }
-    };
-
-    private static boolean hasNextToken(final Iterable<String> textElements, final String value, final int from) {
-        int position = from + 1;
-        while (position < Iterables.size(textElements)) {
-            if (!isNumber(Iterables.get(textElements, position))) {
-                return StringUtils.containsIgnoreCase(Iterables.get(textElements, position), value);
+    private static Predicate<VehicleImageData> ConcomittentDateFilter(final VehicleImageData source) {
+        final LocalDateTime min = source.getDateTaken().minusMinutes(10);
+        final LocalDateTime max = source.getDateTaken().plusMinutes(10);
+        return new Predicate<VehicleImageData>() {
+            @Override
+            public boolean apply(@Nullable VehicleImageData vehicleImageData) {
+                return min.isBefore(vehicleImageData.getDateTaken()) && max.isAfter(vehicleImageData.getDateTaken());
             }
-            position++;
-        }
-        return false;
-    }
-
-    private static boolean isNumber(final String text) {
-        return NUMBER_TEXT_PATTERN.matcher(text).find();
-    }
-
-    public static Iterable<SensorRecord> analyseFlow(final Iterable<AnnotatedImage> images) {
-        ImmutableList.Builder<SensorRecord> result = ImmutableList.builder();
-        for (final AnnotatedImage annotatedImage : images) {
-            result.addAll(analyze(annotatedImage));
-        }
-        return aggregateValues(result.build());
+        };
     }
 
     public static void main(String[] args) throws JAXBException, IOException {
@@ -348,32 +188,28 @@ public abstract class ImageAnalyzer {
 
         final FileOutputStream errorsOut = new FileOutputStream(new File("errors.txt"));
 
-        final ImageAnnotator.AnnotatedImageBatch batch = JAXBUtils.unmarshal(ImageAnnotator.AnnotatedImageBatch.class, new File("/Users/corentin/Documents/Developpement/image-annotations.xml"));
-        for (final SensorRecord sensorRecord : ImageAnalyzer.analyseFlow(Iterables.filter(batch.getAnnotatedImages(), DATE_FILTER))) {
-            logger.info(sensorRecord.getDateTaken() + " : Sensor[" + sensorRecord.getSensorUUID() + "] : " + sensorRecord.getValue() + sensorRecord.getUnit().getDisplay());
-            if (sensorRecord.getUnit() == SensorUnit.UNREADABLE_GASOLINE_VOLUME || sensorRecord.getUnit() == SensorUnit.UNREADABLE_ODOMETER) {
-                final StringBuilder errorMessage = new StringBuilder();
-                errorMessage.append("DateTaken: ").append(DateTimeFormat.forPattern("yyyy-MM-dd HH:mm").print(sensorRecord.getDateTaken())).append("\n");
-                if (sensorRecord instanceof UnreadableGasolineVolumeRecord) {
-                    UnreadableGasolineVolumeRecord unreadableGasolineVolumeRecord = (UnreadableGasolineVolumeRecord) sensorRecord;
-                    errorMessage.append("FileName: ").append(unreadableGasolineVolumeRecord.getFileName()).append("\n");
-                    errorMessage.append("Reason: ").append(unreadableGasolineVolumeRecord.getReason()).append("\n");
-                    errorMessage.append("Annotations:\n");
-                    for (final String annotation : unreadableGasolineVolumeRecord.getAnnotatedTexts()) {
-                        errorMessage.append("  - '").append(Joiner.on("', '").join(Lists.newArrayList(StringUtils.split(annotation, "\n")))).append("'\n");
-                    }
-                    errorMessage.append("_______________________________________________________\n");
-                }
-                errorsOut.write(errorMessage.toString().getBytes());
+        final FileOutputStream sqlOutputStream = new FileOutputStream(new File("carsensors.sql"));
+
+        final File storageDir = new File(SystemUtils.getUserDir(), "carsensors");
+        if (!storageDir.exists()) storageDir.mkdir();
+
+        final ImageAnnotator.AnnotatedImageBatch batch = JAXBUtils.unmarshal(ImageAnnotator.AnnotatedImageBatch.class, new File(storageDir, "image-annotations.xml"));
+        final Iterable<SensorRecord> carSensors = ImageAnalyzer.getFuelStatistics(Iterables.filter(batch.getAnnotatedImages(), DATE_FILTER));
+        int lineNumber = 1;
+        for (final SensorRecord sensorRecord : carSensors) {
+            if (sensorRecord instanceof VehicleFuelEvent) {
+                System.out.println(((VehicleFuelEvent) sensorRecord).toCSVLine());
             }
         }
         errorsOut.close();
+
+        sqlOutputStream.close();
     }
 
     private static final Predicate<AnnotatedImage> DATE_FILTER = new Predicate<AnnotatedImage>() {
         @Override
         public boolean apply(@Nullable AnnotatedImage annotatedImage) {
-            return annotatedImage.getDateTaken().isAfter(new LocalDateTime("2018-9-25T00:00:00"));
+            return annotatedImage.getDateTaken().isAfter(new LocalDateTime("2015-9-25T00:00:00"));
         }
     };
 

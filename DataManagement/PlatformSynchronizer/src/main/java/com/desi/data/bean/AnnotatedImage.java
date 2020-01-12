@@ -11,6 +11,7 @@ import javax.xml.bind.Marshaller;
 import javax.xml.bind.Unmarshaller;
 import javax.xml.bind.annotation.*;
 import java.util.List;
+import java.util.Objects;
 
 @XmlRootElement(name = "annotated-image")
 @XmlAccessorType(XmlAccessType.FIELD)
@@ -113,6 +114,27 @@ public class AnnotatedImage {
         if (StringUtils.isNotEmpty(this.dateTakenStr)) {
             this.dateTaken = new LocalDateTime(this.dateTakenStr);
         }
+    }
+
+    @Override
+    public boolean equals(Object o) {
+        if (this == o) return true;
+        if (!(o instanceof AnnotatedImage)) return false;
+        AnnotatedImage that = (AnnotatedImage) o;
+        return Objects.equals(getDateTaken(), that.getDateTaken()) &&
+                Objects.equals(dateTakenStr, that.dateTakenStr) &&
+                Objects.equals(getFileName(), that.getFileName()) &&
+                Objects.equals(getTextElements(), that.getTextElements()) &&
+                Objects.equals(getLatitudeRef(), that.getLatitudeRef()) &&
+                Objects.equals(getLatitude(), that.getLatitude()) &&
+                Objects.equals(getLongitudeRef(), that.getLongitudeRef()) &&
+                Objects.equals(getLongitude(), that.getLongitude()) &&
+                Objects.equals(getAltitude(), that.getAltitude());
+    }
+
+    @Override
+    public int hashCode() {
+        return Objects.hash(getDateTaken(), dateTakenStr, getFileName(), getTextElements(), getLatitudeRef(), getLatitude(), getLongitudeRef(), getLongitude(), getAltitude());
     }
 
     public static void main(String[] args) throws JAXBException {

@@ -2,6 +2,7 @@ package com.desi.data.bean;
 
 import com.desi.data.SensorRecord;
 import com.desi.data.SensorUnit;
+import org.apache.commons.lang.StringUtils;
 import org.joda.time.LocalDateTime;
 
 import java.util.regex.Matcher;
@@ -17,18 +18,22 @@ public class GPSLongitudeSensorRecord implements SensorRecord {
     public GPSLongitudeSensorRecord(String uuid, LocalDateTime dateTaken, String ref, String lat) {
         this.uuid = uuid;
         this.dateTaken = dateTaken;
-        final Matcher dmsMatcher = GPSLatitudeSensorRecord.DMS_PATTERN.matcher(lat);
-        if (dmsMatcher.find()) {
-            int deg = Integer.parseInt(dmsMatcher.group(1));
-            double min = Double.parseDouble(dmsMatcher.group(2)) / 60;
-            double sec = Double.parseDouble(dmsMatcher.group(3)) / 3600;
-            float temp = new Double(deg + min + sec).floatValue();
-            if (!"E".equalsIgnoreCase(ref)) {
-                temp = -1 * temp;
-            }
-            this.value = temp;
+        if (StringUtils.isEmpty(lat)) {
+            this.value = 0;
         } else {
-            this.value = 0f;
+            final Matcher dmsMatcher = GPSLatitudeSensorRecord.DMS_PATTERN.matcher(lat);
+            if (dmsMatcher.find()) {
+                int deg = Integer.parseInt(dmsMatcher.group(1));
+                double min = Double.parseDouble(dmsMatcher.group(2)) / 60;
+                double sec = Double.parseDouble(dmsMatcher.group(3)) / 3600;
+                float temp = new Double(deg + min + sec).floatValue();
+                if (!"E".equalsIgnoreCase(ref)) {
+                    temp = -1 * temp;
+                }
+                this.value = temp;
+            } else {
+                this.value = 0f;
+            }
         }
     }
 

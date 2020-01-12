@@ -17,14 +17,19 @@ import com.drew.imaging.ImageProcessingException;
 import com.drew.metadata.Directory;
 import com.drew.metadata.Metadata;
 import com.drew.metadata.Tag;
+import com.google.common.base.Function;
 import com.google.common.base.Joiner;
 import com.google.common.base.Optional;
 import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
+import com.google.common.collect.Sets;
+import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
+import org.apache.commons.lang.SystemUtils;
 import org.apache.log4j.PropertyConfigurator;
+import org.checkerframework.checker.nullness.qual.Nullable;
 import org.joda.time.LocalDateTime;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
@@ -39,6 +44,7 @@ import java.awt.image.BufferedImage;
 import java.io.*;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
@@ -64,6 +70,8 @@ public class ImageAnnotator {
 
     private final File credentialsFile;
 
+    private final File storageFile;
+
     private final PlatformClientId clientId;
 
     private String accessKey;
@@ -76,10 +84,15 @@ public class ImageAnnotator {
 
     private VisionConnector visionConnector = null;
 
-    public ImageAnnotator(List<String> s3BucketNames, File credentialsFile, PlatformClientId clientId) {
+    private Set<String> knownFileNames = Sets.newHashSet();
+
+    private AnnotatedImageBatch annotatedImageBatch = new AnnotatedImageBatch();
+
+    public ImageAnnotator(List<String> s3BucketNames, File credentialsFile, File storageFile, PlatformClientId clientId) {
         this.s3BucketNames = s3BucketNames;
         this.credentialsFile = credentialsFile;
         this.clientId = clientId;
+        this.storageFile = storageFile;
     }
 
     public Iterable<AnnotatedImage> annotate(final LocalDateTime checkPoint) {
@@ -92,6 +105,7 @@ public class ImageAnnotator {
                 withRegion(REGION).
                 build();
 
+
         for (final String s3BucketName : s3BucketNames) {
             final ListObjectsV2Result result = s3.listObjectsV2(s3BucketName);
 
@@ -101,7 +115,7 @@ public class ImageAnnotator {
                 try {
                     final Optional<LocalDateTime> guessedFileDateTime = guessDateTimeFromKey(os.getKey());
 
-                    if (acceptFileName(os.getKey()) && (!guessedFileDateTime.isPresent() || guessedFileDateTime.get().isAfter(checkPoint))) {
+                    if (!knownFileNames.contains(FilenameUtils.getName(os.getKey())) && acceptFileName(os.getKey()) && (!guessedFileDateTime.isPresent() || guessedFileDateTime.get().isAfter(checkPoint))) {
                         S3Object fullObject = s3.getObject(new GetObjectRequest(os.getBucketName(), os.getKey()));
 
                         if (new LocalDateTime(fullObject.getObjectMetadata().getLastModified()).isAfter(checkPoint)) {
@@ -109,32 +123,44 @@ public class ImageAnnotator {
                             final Optional<AnnotatedImage> annotation = annotateImage(fullObject.getObjectContent(), os.getKey(), checkPoint);
                             if (annotation.isPresent()) {
                                 annotatedImages.add(annotation.get());
+                                this.annotatedImageBatch.getAnnotatedImages().add(annotation.get());
                             }
                             //records.addAll(parseContent(fullObject.getObjectContent()));
+                        } else {
+                            logger.info("File '" + os.getKey() + "' ignored because it is too old");
+                        }
+                    } else {
+                        if (knownFileNames.contains(FilenameUtils.getName(os.getKey()))) {
+                            logger.info("File '" + os.getKey() + "' ignored because it has already been annotated");
+                        } else if (acceptFileName(os.getKey())) {
+                            logger.info("File '" + os.getKey() + "' ignored because it is too old");
                         }
                     }
                 } catch (Exception e) {
                     logger.error("Failed to parse file s3://" + os.getBucketName() + "/" + os.getKey() + ": " + e.getMessage(), e);
                 }
-                if (annotatedImages.size() > 0 && (annotatedImages.size() % 5) == 0) {
-                    final File outputFile = new File("temp-image-annotations.xml");
-                    try {
-                        final AnnotatedImageBatch batch = new AnnotatedImageBatch();
-                        batch.getAnnotatedImages().addAll(annotatedImages);
-                        JAXBUtils.marshal(batch, outputFile, true);
-                        logger.info("Annotations saved into file '" + outputFile.getAbsolutePath() + "'");
-                    } catch (Throwable t) {
-                        logger.error("Cannot marshall image annotations", t);
-                    }
+                if (annotatedImages.size() > 0 && (annotatedImages.size() % 2) == 0) {
+                    store();
                 }
             }
         }
 
         s3.shutdown();
 
-
+        store();
 
         return ImmutableList.copyOf(annotatedImages);
+    }
+
+    private void store() {
+        logger.info("Storing images into file '" + this.storageFile.getAbsolutePath() + "'");
+        try {
+            JAXBUtils.marshal(this.annotatedImageBatch, this.storageFile, true);
+        } catch (JAXBException e) {
+            throw new IllegalStateException("Cannot marshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot marshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
+        }
     }
 
     private boolean acceptFileName(final String key) {
@@ -232,6 +258,28 @@ public class ImageAnnotator {
             throw new IllegalStateException("Credentials file '" + this.credentialsFile.getPath() + "' does not exist");
         }
 
+        logger.info("Searching for already annotated images into storage file '" + this.storageFile + "'");
+        if (this.storageFile.exists()) {
+            AnnotatedImageBatch batch = null;
+            try {
+                batch = JAXBUtils.unmarshal(AnnotatedImageBatch.class, this.storageFile);
+            } catch (JAXBException e) {
+                logger.error("Cannot unmarshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
+            } catch (IOException e) {
+                logger.error("Cannot unmarshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
+            }
+            if (batch != null) {
+                Iterables.addAll(this.knownFileNames, Iterables.transform(batch.getAnnotatedImages(), new Function<AnnotatedImage, String>() {
+                    @Nullable
+                    @Override
+                    public String apply(@Nullable AnnotatedImage annotatedImage) {
+                        return annotatedImage.getFileName();
+                    }
+                }));
+                this.annotatedImageBatch.getAnnotatedImages().addAll(batch.getAnnotatedImages());
+            }
+        }
+
         try {
             credentialsConfig = JAXBUtils.unmarshal(PlatformCredentialsConfig.class, this.credentialsFile);
         } catch (Throwable t) {
@@ -294,7 +342,10 @@ public class ImageAnnotator {
                 System.exit(4);
             }*/
 
-            final Iterable<AnnotatedImage> annotatedImages = new ImageAnnotator(Lists.newArrayList("desi-legacy-counters-images", "desi-counters-images"), new File(args[0]), PlatformClientId.S3Bridge).annotate(LocalDateTime.parse("2010-1-1T00:00:00"));
+            final File storageDir = new File(SystemUtils.getUserDir(), "carsensors");
+            if (!storageDir.exists()) storageDir.mkdir();
+
+            final Iterable<AnnotatedImage> annotatedImages = new ImageAnnotator(Lists.newArrayList("desi-legacy-counters-images" /*, */ /*"desi-counters-images"*/), new File(args[0]), new File(storageDir, "image-annotations.xml"), PlatformClientId.S3Bridge).annotate(LocalDateTime.parse("2010-1-1T00:00:00"));
             final AnnotatedImageBatch batch = new AnnotatedImageBatch();
             Iterables.addAll(batch.getAnnotatedImages(), annotatedImages);
 

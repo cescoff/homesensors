@@ -159,6 +159,11 @@ public class CarConfigurationHelper implements SensorNameProvider {
             }
 
             @Override
+            public boolean isVehicleInATrip(CarSensorRecord carSensorRecord) {
+                return isTrip(carSensorRecord);
+            }
+
+            @Override
             public boolean isValidGasolineVolume(float value) {
                 return value > 5 && value < 50;
             }
@@ -219,7 +224,7 @@ public class CarConfigurationHelper implements SensorNameProvider {
             }
 
             @Override
-            public boolean isInImage(AnnotatedImage image) {
+            public boolean isVehicleInImage(AnnotatedImage image) {
                 for (final String text : image.getTextElements()) {
                     for (final String tag : PEUGEOT_305_CAR_TAGS) {
                         if (StringUtils.containsIgnoreCase(text, tag)) {
@@ -280,6 +285,11 @@ public class CarConfigurationHelper implements SensorNameProvider {
             }
 
             @Override
+            public boolean isVehicleInATrip(CarSensorRecord carSensorRecord) {
+                return isTrip(carSensorRecord);
+            }
+
+            @Override
             public boolean isValidGasolineVolume(float value) {
                 return value > 5 && value < 50;
             }
@@ -312,7 +322,7 @@ public class CarConfigurationHelper implements SensorNameProvider {
 
 
             @Override
-            public boolean isInImage(AnnotatedImage image) {
+            public boolean isVehicleInImage(AnnotatedImage image) {
                 for (final String text : image.getTextElements()) {
                     for (final String tag : VW_LT25_01_CAR_TAGS) {
                         if (StringUtils.containsIgnoreCase(text, tag)) {

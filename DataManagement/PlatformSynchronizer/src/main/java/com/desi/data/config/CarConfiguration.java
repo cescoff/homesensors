@@ -35,6 +35,8 @@ public interface CarConfiguration {
 
     public Optional<Float> getOdometerValue(final AnnotatedImage image);
 
-    public boolean isInImage(final AnnotatedImage image);
+    public boolean isVehicleInImage(final AnnotatedImage image);
+
+    public boolean isVehicleInATrip(final CarSensorRecord carSensorRecord);
 
 }

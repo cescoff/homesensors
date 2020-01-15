@@ -72,7 +72,7 @@ public class FuelOCRParser {
             return Optional.of(new BasicVehicleImageData(image, configuration.getUUID(), odometerValue.get()));
         }
         if (!isFuelImage(image)) {
-            if (configuration.isInImage(image)) {
+            if (configuration.isVehicleInImage(image)) {
                 return Optional.of(new BasicVehicleImageData(image, configuration.getUUID()));
             } else {
                 return Optional.absent();

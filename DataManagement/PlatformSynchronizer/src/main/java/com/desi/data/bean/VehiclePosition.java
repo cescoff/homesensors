@@ -1,10 +1,13 @@
 package com.desi.data.bean;
 
+import com.desi.data.CarSensorRecord;
 import com.desi.data.SensorRecord;
 import com.desi.data.SensorUnit;
 import org.joda.time.LocalDateTime;
 
-public class VehiclePosition implements SensorRecord, Exportable  {
+public class VehiclePosition implements CarSensorRecord, Exportable  {
+
+    final VehicleImageData imageData;
 
     private final String uuid;
 
@@ -14,16 +17,20 @@ public class VehiclePosition implements SensorRecord, Exportable  {
 
     private final float longitude;
 
+    private final float altitude;
+
     private final float speed;
 
     private final String fileName;
 
-    public VehiclePosition(String uuid, String fileName, LocalDateTime dateTime, float latitude, float longitude, float speed) {
+    public VehiclePosition(VehicleImageData imageData, String uuid, String fileName, LocalDateTime dateTime, float latitude, float longitude, float altitude, float speed) {
+        this.imageData = imageData;
         this.uuid = uuid;
         this.fileName = fileName;
         this.dateTime = dateTime;
         this.latitude = latitude;
         this.longitude = longitude;
+        this.altitude = altitude;
         this.speed = speed;
     }
 
@@ -37,6 +44,16 @@ public class VehiclePosition implements SensorRecord, Exportable  {
 
     public float getLongitude() {
         return longitude;
+    }
+
+    @Override
+    public float getAltitude() {
+        return 0;
+    }
+
+    @Override
+    public VehicleImageData getImageData() {
+        return imageData;
     }
 
     public float getSpeed() {

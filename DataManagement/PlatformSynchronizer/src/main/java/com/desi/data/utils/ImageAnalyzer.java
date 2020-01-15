@@ -164,8 +164,20 @@ public abstract class ImageAnalyzer {
                         if (volumeSum > 0) priceAvg = priceSum / volumeSum;
                         else priceAvg = 0;
 
-                        result.add(new DistanceRecord(odometerValue, carConfiguration.getDistanceUUID(previousValue, odometerRecord), odometerValue.getDateTaken(), distance));
-                        result.add(new VehiclePosition(carConfiguration.getGPSUUID(), odometerValue.getFileName(), odometerValue.getDateTaken(), odometerValue.getLatitude(), odometerValue.getLongitude(), 0));
+                        result.add(new DistanceRecord(
+                                odometerValue,
+                                carConfiguration.getDistanceUUID(previousValue, odometerRecord),
+                                odometerValue.getDateTaken(),
+                                distance));
+                        result.add(new VehiclePosition(
+                                odometerValue.getImageData(),
+                                carConfiguration.getGPSUUID(),
+                                odometerValue.getFileName(),
+                                odometerValue.getDateTaken(),
+                                odometerValue.getLatitude(),
+                                odometerValue.getLongitude(),
+                                odometerValue.getAltitude(),
+                                0));
 
                         if (carConfiguration.isValidGasolineConsumption(consumption)) {
                             result.add(new VehicleFuelEvent(
@@ -190,7 +202,15 @@ public abstract class ImageAnalyzer {
 
             for (final VehicleImageData vehicleImageData : otherValues) {
                 if (vehicleImageData.getLatitude() != 0 && vehicleImageData.getLongitude() != 0) {
-                    result.add(new VehiclePosition(carConfiguration.getGPSUUID(), vehicleImageData.getFileName(), vehicleImageData.getDateTaken(), vehicleImageData.getLatitude(), vehicleImageData.getLongitude(), 0));
+                    result.add(new VehiclePosition(
+                            vehicleImageData,
+                            carConfiguration.getGPSUUID(),
+                            vehicleImageData.getFileName(),
+                            vehicleImageData.getDateTaken(),
+                            vehicleImageData.getLatitude(),
+                            vehicleImageData.getLongitude(),
+                            vehicleImageData.getAltitude(),
+                            0));
                 }
             }
 

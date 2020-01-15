@@ -1,5 +1,6 @@
 package com.desi.data.bean;
 
+import com.desi.data.CarSensorRecord;
 import com.desi.data.SensorRecord;
 import com.desi.data.SensorUnit;
 import com.google.common.collect.Iterables;
@@ -8,8 +9,11 @@ import org.joda.time.LocalDate;
 import org.joda.time.LocalDateTime;
 
 import java.util.List;
+import java.util.Vector;
 
-public class OdometerRecord implements SensorRecord {
+public class OdometerRecord implements CarSensorRecord {
+
+    private final VehicleImageData imageData;
 
     private final float value;
 
@@ -17,15 +21,20 @@ public class OdometerRecord implements SensorRecord {
 
     private final LocalDateTime dateTaken;
 
-    private final String fileName;
-
     private final List<String> annotatedTexts = Lists.newArrayList();
 
-    public OdometerRecord(float value, String uuid, LocalDateTime dateTaken, String fileName) {
+    public OdometerRecord(VehicleImageData image, String uuid, float value) {
         this.value = value;
         this.uuid = uuid;
+        this.imageData = image;
+        this.dateTaken = null;
+    }
+
+    public OdometerRecord(VehicleImageData image, String uuid, LocalDateTime dateTaken, float value) {
+        this.value = value;
+        this.uuid = uuid;
+        this.imageData = image;
         this.dateTaken = dateTaken;
-        this.fileName = fileName;
     }
 
     @Override
@@ -53,7 +62,8 @@ public class OdometerRecord implements SensorRecord {
     }
 
     public String getFileName() {
-        return fileName;
+        if (imageData == null) return null;
+        return imageData.getFileName();
     }
 
     public List<String> getAnnotatedTexts() {
@@ -64,13 +74,34 @@ public class OdometerRecord implements SensorRecord {
         return record.getDateTaken().isAfter(getDateTaken().minusMinutes(10)) && record.getDateTaken().isBefore(getDateTaken().plusMinutes(10));
     }
 
+    @Override
+    public float getLatitude() {
+        if (imageData == null) return 0;
+        return imageData.getLatitude();
+    }
+
+    @Override
+    public float getLongitude() {
+        if (imageData == null) return 0;
+        return imageData.getLongitude();
+    }
+
+    @Override
+    public float getAltitude() {
+        if (imageData == null) return 0;
+        return imageData.getAltitude();
+    }
+
+    @Override
+    public VehicleImageData getImageData() {
+        return imageData;
+    }
+
     public static Builder builder() {
         return new Builder();
     }
 
     public static class Builder {
-
-        private String fileName;
 
         private String uuid;
 
@@ -80,12 +111,9 @@ public class OdometerRecord implements SensorRecord {
 
         private List<String> textElements = Lists.newArrayList();
 
-        private boolean unreadable = false;
+        private VehicleImageData vehicleImageData;
 
-        public Builder withFileName(final String fileName) {
-            this.fileName = fileName;
-            return this;
-        }
+        private boolean unreadable = false;
 
         public Builder withUUID(final String uuid) {
             this.uuid = uuid;
@@ -108,7 +136,6 @@ public class OdometerRecord implements SensorRecord {
         }
 
         public Builder withImage(final AnnotatedImage image) {
-            withFileName(image.getFileName());
             withDateTaken(image.getDateTaken());
             withTextElements(image.getTextElements());
             return this;
@@ -121,11 +148,11 @@ public class OdometerRecord implements SensorRecord {
 
         public SensorRecord build() {
             if (unreadable) {
-                final UnreadableCarOdometerRecord result = new UnreadableCarOdometerRecord(dateTaken, uuid, fileName);
+                final UnreadableCarOdometerRecord result = new UnreadableCarOdometerRecord(dateTaken, uuid, null);
                 result.addTexts(textElements);
                 return result;
             }
-            final OdometerRecord result = new OdometerRecord(value, uuid, dateTaken, fileName);
+            final OdometerRecord result = new OdometerRecord(null, uuid, dateTaken, value);
             result.addTexts(textElements);
             return result;
         }

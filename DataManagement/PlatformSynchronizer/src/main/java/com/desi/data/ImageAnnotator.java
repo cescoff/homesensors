@@ -9,6 +9,7 @@ import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.desi.data.bean.*;
+import com.desi.data.config.ConfigurationUtils;
 import com.desi.data.config.PlatformCredentialsConfig;
 import com.desi.data.utils.JAXBUtils;
 import com.desi.data.vision.VisionConnector;
@@ -24,6 +25,7 @@ import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
 import com.google.common.collect.Sets;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.io.FilenameUtils;
 import org.apache.commons.io.IOUtils;
 import org.apache.commons.lang.StringUtils;
@@ -64,7 +66,7 @@ public class ImageAnnotator {
 
     private static Logger logger = LoggerFactory.getLogger(ImageAnnotator.class);
 
-    private static final String REGION = "us-east-1";
+    private static final String REGION = "eu-west-3";
 
     private final List<String> s3BucketNames;
 
@@ -95,7 +97,7 @@ public class ImageAnnotator {
         this.storageFile = storageFile;
     }
 
-    public Iterable<AnnotatedImage> annotate(final LocalDateTime checkPoint) {
+    public Iterable<AnnotatedImage> annotate(final LocalDateTime checkPoint, final boolean includeLegacy) {
         init();
 
         final List<AnnotatedImage> annotatedImages = Lists.newArrayList();
@@ -113,14 +115,16 @@ public class ImageAnnotator {
 
             for (S3ObjectSummary os : objects) {
                 try {
-                    final Optional<LocalDateTime> guessedFileDateTime = guessDateTimeFromKey(os.getKey());
+                    final String fileName = FilenameUtils.getName(os.getKey());
 
-                    if (!knownFileNames.contains(FilenameUtils.getName(os.getKey())) && acceptFileName(os.getKey()) && (!guessedFileDateTime.isPresent() || guessedFileDateTime.get().isAfter(checkPoint))) {
+                    final Optional<LocalDateTime> guessedFileDateTime = guessDateTimeFromKey(fileName);
+
+                    if (!knownFileNames.contains(fileName) && acceptFileName(fileName) && (!guessedFileDateTime.isPresent() || guessedFileDateTime.get().isAfter(checkPoint))) {
                         S3Object fullObject = s3.getObject(new GetObjectRequest(os.getBucketName(), os.getKey()));
 
                         if (new LocalDateTime(fullObject.getObjectMetadata().getLastModified()).isAfter(checkPoint)) {
                             logger.info("Parsing content for object s3://" + os.getBucketName() + "/" + os.getKey());
-                            final Optional<AnnotatedImage> annotation = annotateImage(fullObject.getObjectContent(), os.getKey(), checkPoint);
+                            final Optional<AnnotatedImage> annotation = annotateImage(fullObject.getObjectContent(), fileName, checkPoint);
                             if (annotation.isPresent()) {
                                 annotatedImages.add(annotation.get());
                                 this.annotatedImageBatch.getAnnotatedImages().add(annotation.get());
@@ -149,6 +153,10 @@ public class ImageAnnotator {
 
         store();
 
+        if (includeLegacy) {
+            Iterables.addAll(annotatedImages, load());
+        }
+
         return ImmutableList.copyOf(annotatedImages);
     }
 
@@ -156,6 +164,17 @@ public class ImageAnnotator {
         logger.info("Storing images into file '" + this.storageFile.getAbsolutePath() + "'");
         try {
             JAXBUtils.marshal(this.annotatedImageBatch, this.storageFile, true);
+        } catch (JAXBException e) {
+            throw new IllegalStateException("Cannot marshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
+        } catch (IOException e) {
+            throw new IllegalStateException("Cannot marshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
+        }
+    }
+
+    private Iterable<AnnotatedImage> load() {
+        logger.info("Loading images stored into file '" + this.storageFile.getAbsolutePath() + "'");
+        try {
+            return JAXBUtils.unmarshal(AnnotatedImageBatch.class, this.storageFile).getAnnotatedImages();
         } catch (JAXBException e) {
             throw new IllegalStateException("Cannot marshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
         } catch (IOException e) {
@@ -188,7 +207,7 @@ public class ImageAnnotator {
         Metadata metadata = ImageMetadataReader.readMetadata(new ByteArrayInputStream(imageInMemory.toByteArray()));
         for (Directory directory : metadata.getDirectories()) {
             for (Tag tag : directory.getTags()) {
-                if (tag.getTagType() == 306) {
+                if (tag.getTagType() == 306 || tag.getTagType() == 36867) {
                     imageDateTime = EXIF_DATE_TIME_FORMAT.parseLocalDateTime(tag.getDescription());
                 }
                 final String tagString = tag.toString();
@@ -202,6 +221,15 @@ public class ImageAnnotator {
                     longitude = StringUtils.remove(tagString, EXIF_GPS_LONGITUDE);
                 } else if (StringUtils.contains(tagString, EXIF_GPS_ALTITUDE)) {
                     altitude = StringUtils.remove(tagString, EXIF_GPS_ALTITUDE);
+                }
+            }
+        }
+        if (imageDateTime == null) {
+            Pattern filePattern = Pattern.compile("IMG_([0-9]{8}_[0-9]{6})_[0-9]+.[jJpPeEgG]+");
+            Matcher matcher = filePattern.matcher(fileName);
+            if (matcher.matches()) {
+                if (matcher.groupCount() > 0) {
+                    imageDateTime = DateTimeFormat.forPattern("yyyyMMdd_HHmmss").parseLocalDateTime(matcher.group(1));
                 }
             }
         }
@@ -264,8 +292,10 @@ public class ImageAnnotator {
             try {
                 batch = JAXBUtils.unmarshal(AnnotatedImageBatch.class, this.storageFile);
             } catch (JAXBException e) {
+                FileUtils.deleteQuietly(this.storageFile);
                 logger.error("Cannot unmarshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
             } catch (IOException e) {
+                FileUtils.deleteQuietly(this.storageFile);
                 logger.error("Cannot unmarshall storage file '" + this.storageFile.getAbsolutePath() + "'", e);
             }
             if (batch != null) {
@@ -286,7 +316,7 @@ public class ImageAnnotator {
             throw new IllegalStateException("Malformed file '" + this.credentialsFile.getPath() + "'", t);
         }
 
-        visionConnector = new VisionConnector();
+        visionConnector = new VisionConnector("957454963747", "ICN8559245023445516288");
         PlatformCredentialsConfig.Credentials candidate = null;
         for (final PlatformCredentialsConfig.Credentials configuredCredentials : this.credentialsConfig.getCredentials()) {
             if (configuredCredentials.getId() == PlatformClientId.BigQuery) {
@@ -317,6 +347,20 @@ public class ImageAnnotator {
         throw new IllegalStateException("No service '" + this.clientId + "' configured into file '" + this.credentialsFile.getPath() + "'");
     }
 
+    public PlatformCredentialsConfig.Credentials getGoogleCloudCredentials() {
+        init();
+        for (final PlatformCredentialsConfig.Credentials configuredCredentials : this.credentialsConfig.getCredentials()) {
+            if (configuredCredentials.getId() == PlatformClientId.BigQuery) {
+                return configuredCredentials;
+            }
+        }
+        throw new IllegalStateException("Google cloud not configured");
+    }
+
+    public File getConfigDir() {
+        init();
+        return credentialsFile.getParentFile();
+    }
 
     public static void main(String[] args) {
         if (args.length != 1) {
@@ -342,17 +386,13 @@ public class ImageAnnotator {
                 System.exit(4);
             }*/
 
-            final File storageDir = new File(SystemUtils.getUserDir(), "carsensors");
-            if (!storageDir.exists()) storageDir.mkdir();
-
-            final Iterable<AnnotatedImage> annotatedImages = new ImageAnnotator(Lists.newArrayList("desi-legacy-counters-images" /*, */ /*"desi-counters-images"*/), new File(args[0]), new File(storageDir, "image-annotations.xml"), PlatformClientId.S3Bridge).annotate(LocalDateTime.parse("2010-1-1T00:00:00"));
+            final Iterable<AnnotatedImage> annotatedImages = new ImageAnnotator(Lists.newArrayList("desi-car-fuel" /*, */ /*"desi-counters-images"*/), new File(args[0]), ConfigurationUtils.getAnnotationsFile(), PlatformClientId.S3Bridge).annotate(LocalDateTime.parse("2010-1-1T00:00:00"), true);
             final AnnotatedImageBatch batch = new AnnotatedImageBatch();
             Iterables.addAll(batch.getAnnotatedImages(), annotatedImages);
 
-            final File outputFile = new File("temp-image-annotations.xml");
             try {
-                JAXBUtils.marshal(batch, outputFile, true);
-                logger.info("Annotations saved into file '" + outputFile.getAbsolutePath() + "'");
+                JAXBUtils.marshal(batch, ConfigurationUtils.getAnnotationsFile(), true);
+                logger.info("Annotations saved into file '" + ConfigurationUtils.getAnnotationsFile() + "'");
             } catch (Throwable t) {
                 logger.error("Cannot marshall image annotations", t);
             }

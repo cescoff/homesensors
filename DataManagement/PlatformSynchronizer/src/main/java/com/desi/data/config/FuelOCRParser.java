@@ -1,6 +1,7 @@
 package com.desi.data.config;
 
 import com.desi.data.ImageAnnotator;
+import com.desi.data.SensorUnit;
 import com.desi.data.bean.AnnotatedImage;
 import com.desi.data.bean.GPSLatitudeSensorRecord;
 import com.desi.data.bean.GPSLongitudeSensorRecord;
@@ -11,16 +12,14 @@ import com.google.common.base.Function;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
+import org.apache.commons.io.LineIterator;
 import org.apache.commons.lang.StringUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.joda.time.LocalDateTime;
 
 import javax.xml.bind.JAXBException;
-import java.io.File;
-import java.io.IOException;
-import java.util.List;
-import java.util.Map;
-import java.util.Objects;
+import java.io.*;
+import java.util.*;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -32,11 +31,13 @@ public class FuelOCRParser {
             put("니", "4").
             put("O", "0").
             put("Б", "6").
-            put("b", "6").build();
+            put("b", "6").
+            put("|", "")
+        .build();
 
     private static final Pattern PRICE_PATTERN_DEGRAGED = Pattern.compile("([0-9]*[\\s.,]+[0-9]+)\\s*[e€]+.*");
     private static final Pattern PRICE_PATTERN = Pattern.compile("([0-9]+\\.*,*[0-9]*)\\s*[e€]+");
-    private static final Pattern DISPLAY_FLOAT_PATTERN = Pattern.compile("([0-9]+\\s*\\.*,*\\s*[0-9]+\\s*)");
+    private static final Pattern DISPLAY_FLOAT_PATTERN = Pattern.compile("([0-9]+\\s*\\.*,*\\s*[0-9]+\\s*[0-9]*)");
 
     private final CarConfiguration configuration;
 
@@ -68,127 +69,300 @@ public class FuelOCRParser {
     public Optional<VehicleImageData> analyzeImage(final AnnotatedImage image) {
         final Optional<Float> odometerValue = configuration.getOdometerValue(image);
         if (odometerValue.isPresent()) {
-            return Optional.of(new BasicVehicleImageData(image, odometerValue.get()));
+            return Optional.of(new BasicVehicleImageData(image, configuration.getUUID(), odometerValue.get()));
         }
         if (!isFuelImage(image)) {
-            return Optional.absent();
+            if (configuration.isInImage(image)) {
+                return Optional.of(new BasicVehicleImageData(image, configuration.getUUID()));
+            } else {
+                return Optional.absent();
+            }
         }
-        Price pricePerLitre = null;
-        Price fullPrice = null;
-        float volume = 0;
-        List<Float> otherValues = Lists.newArrayList();
+        Value pricePerLitre = null;
+        Value fullPrice = null;
+        Value volume = null;
+        List<Value> otherValues = Lists.newArrayList();
 
         for (final String text : cleanupTexts(image.getTextElements())) {
-            final Optional<Price> price = getPrice(text);
-            if (price.isPresent()) {
-                if (configuration.isValidGasolinePricePerLitre(price.get().value) && price.get().isPricePerLitre) {
-                    if (pricePerLitre == null || !pricePerLitre.trusted) {
-                        pricePerLitre = price.get();
+            final List<Value> prices = getPrice(text);
+            if (prices.size() > 0) {
+                for (final Value price : prices) {
+                    if (price.type == ValueType.PRICE_PER_LITRE) {
+                        pricePerLitre = price;
+                    } else if (price.type == ValueType.FULL_PRICE) {
+                        fullPrice = price;
+                    } else {
+                        if (otherValues.size() == 0 && configuration.isValidReFuelFullPrice(price.value)) {
+                            fullPrice = new Value(ValueType.FULL_PRICE, price.value, false);
+                        }
+                        otherValues.add(price);
                     }
-                } else if ((fullPrice == null || !fullPrice.trusted) && !price.get().isPricePerLitre) {
-                    fullPrice = price.get();
                 }
-            } else if (getFloatValue(text).isPresent()) {
-                otherValues.add(getFloatValue(text).get());
+            } else if (getFloatValue(text).size() > 0) {
+                if (otherValues.size() == 0) {
+                    float price = Ordering.natural().reverse().onResultOf(new Function<Value, Float>() {
+                        @Nullable
+                        @Override
+                        public Float apply(@Nullable Value value) {
+                            return value.value;
+                        }
+                    }).sortedCopy(getFloatValue(text)).get(0).value;
+                    if (configuration.isValidReFuelFullPrice(price)) {
+                        fullPrice = new Value(ValueType.FULL_PRICE, price, false);
+                    }
+                }
+                otherValues.addAll(getFloatValue(text));
             }
         }
 
-        if (pricePerLitre == null && fullPrice == null && volume == 0 && !hasValidFuelPricePerLitre(otherValues)) {
-            otherValues = Ordering.natural().reverse().sortedCopy(Sets.newHashSet(otherValues));
-            if (otherValues.size() == 2) {
-                fullPrice = new Price(false, otherValues.get(0), false);
-                volume = otherValues.get(1);
-            } else {
-                for (int index = 0; index < otherValues.size(); index++) {
-                    for (int test = index; test < otherValues.size(); test++) {
-                        if (fullPrice == null) {
-                            float ratio = otherValues.get(index) / otherValues.get(test);
-                            if (1.4 <= ratio && ratio <= 1.75) {
-                                fullPrice = new Price(false, otherValues.get(index), false);
-                                volume = otherValues.get(test);
+        otherValues = cleanupOtherValues(otherValues, pricePerLitre, fullPrice, volume);
+
+        float resultfullPrice = 0;
+        float resultVolume = 0;
+        float resultPricePerLitre = 0;
+
+        for (final Value otherValue : otherValues) {
+            if (otherValue.type == ValueType.FULL_PRICE) {
+                resultfullPrice = otherValue.value;
+            } else if (otherValue.type == ValueType.VOLUME) {
+                resultVolume = otherValue.value;
+            } else if (otherValue.type == ValueType.PRICE_PER_LITRE) {
+                resultPricePerLitre = otherValue.value;
+            }
+        }
+
+        if (resultVolume == 0 && resultPricePerLitre == 0) {
+            for (final Value otherValue : otherValues) {
+                if (resultfullPrice == 0 && otherValue.type == ValueType.PRICE && configuration.isValidGasolinePricePerLitre(otherValue.value)) {
+                    resultPricePerLitre = otherValue.value;
+                }
+                if (resultVolume == 0 && otherValue.type == ValueType.UNKNOWN && configuration.isValidGasolineVolume(otherValue.value)) {
+                    resultVolume = otherValue.value;
+                }
+            }
+            resultfullPrice = resultVolume * resultPricePerLitre;
+        }
+
+        return Optional.of(new BasicVehicleImageData(image, configuration.getUUID(), resultVolume, resultVolume > 0, resultfullPrice, resultfullPrice > 0, resultPricePerLitre, resultPricePerLitre > 0));
+    }
+
+    private List<Value> cleanupOtherValues(final List<Value> values, final Value pricePerLitre, final Value fullPrice, final Value volume) {
+        final List<Value> unique = Lists.newArrayList(Iterables.filter(Sets.newHashSet(values), new Predicate<Value>() {
+            @Override
+            public boolean apply(@Nullable Value aFloat) {
+                if (pricePerLitre != null && pricePerLitre.trusted && pricePerLitre.value == aFloat.value) {
+                    return false;
+                }
+                if (fullPrice != null && fullPrice.trusted && fullPrice.value == aFloat.value) {
+                    return false;
+                }
+                if (volume != null && volume.value == aFloat.value) {
+                    return false;
+                }
+                return true;
+            }
+        }));
+        if (pricePerLitre != null) {
+            if (fullPrice != null) {
+                final float volumeValue = fullPrice.value / pricePerLitre.value;
+                for (final Value otherValue : unique) {
+                    if (fuzzyEquals(volumeValue, otherValue.value)) {
+                        return ImmutableList.of(new Value(ValueType.FULL_PRICE, fullPrice.value,true),
+                                new Value(ValueType.VOLUME, otherValue.value, true),
+                                new Value(ValueType.PRICE_PER_LITRE, pricePerLitre.value, true));
+                    }
+                }
+                if (configuration.isValidGasolineVolume(volumeValue)) {
+                    return ImmutableList.of(new Value(ValueType.FULL_PRICE, fullPrice.value,false),
+                            new Value(ValueType.VOLUME, volumeValue, false),
+                            new Value(ValueType.PRICE_PER_LITRE, pricePerLitre.value, false));
+                }
+            } else if (volume != null) {
+                final float fullPriceValue = pricePerLitre.value * volume.value;
+                for (final Value otherValue : unique) {
+                    if (fuzzyEquals(fullPriceValue, otherValue.value)) {
+                        return ImmutableList.of(new Value(ValueType.FULL_PRICE, otherValue.value,true),
+                                new Value(ValueType.VOLUME, volume.value, true),
+                                new Value(ValueType.PRICE_PER_LITRE, pricePerLitre.value, true));
+                    }
+                }
+                if (configuration.isValidReFuelFullPrice(fullPriceValue)) {
+                    return ImmutableList.of(new Value(ValueType.FULL_PRICE, fullPriceValue,false),
+                            new Value(ValueType.VOLUME, volume.value, false),
+                            new Value(ValueType.PRICE_PER_LITRE, pricePerLitre.value, false));
+                }
+            }
+            final Iterable<Value> multiplied = Iterables.transform(values, Multiply(pricePerLitre.value));
+            final Iterable<Value> divided = Iterables.transform(values, Divide(pricePerLitre.value));
+
+            Value fullPriceResult = null;
+            Value volumeResult = null;
+            for (final Value otherValue : values) {
+                Iterable<Value> test = Iterables.filter(multiplied, FuzzyEqualsFilter(otherValue.value));
+                if (!Iterables.isEmpty(test)) {
+                    final Iterable<Value> fullPriceCandidate = Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(test, null).value));
+                    fullPriceResult = new Value(ValueType.FULL_PRICE, Iterables.getFirst(fullPriceCandidate, null).value, true);
+                    final Iterable<Value> volumeCandidate = Iterables.filter(values, FuzzyEqualsFilter(fullPriceResult.value / pricePerLitre.value));
+                    volumeResult = new Value(ValueType.VOLUME, Iterables.getFirst(Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(volumeCandidate, null).value)), null).value, true);
+                    return ImmutableList.of(fullPriceResult, volumeResult, pricePerLitre);
+                } else {
+                    test = Iterables.filter(divided, FuzzyEqualsFilter(otherValue.value));
+                    if (!Iterables.isEmpty(test)) {
+                        final Iterable<Value> volumeCandidate = Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(test, null).value));
+                        volumeResult = new Value(ValueType.VOLUME, Iterables.getFirst(Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(volumeCandidate, null).value)), null).value, true);
+                        final Iterable<Value> fullPriceCandidate = Iterables.filter(values, FuzzyEqualsFilter(volumeResult.value * pricePerLitre.value));
+                        fullPriceResult = new Value(ValueType.FULL_PRICE, Iterables.getFirst(fullPriceCandidate, null).value, true);
+                        return ImmutableList.of(fullPriceResult, volumeResult, pricePerLitre);
+                    }
+                }
+            }
+
+        } else if (fullPrice != null) {
+            if (volume != null) {
+                final float pricePerLitreValue = fullPrice.value / volume.value;
+                for (final Value otherValue : unique) {
+                    if (fuzzyEquals(pricePerLitreValue, otherValue.value)) {
+                        return ImmutableList.of(new Value(ValueType.FULL_PRICE, fullPrice.value,true),
+                                new Value(ValueType.VOLUME, volume.value, true),
+                                new Value(ValueType.PRICE_PER_LITRE, otherValue.value, true));
+                    }
+                }
+            }
+
+            Value pricePerLitreResult = null;
+            Value volumeResult = null;
+            for (final Value otherValue : values) {
+                Iterable<Value> volumeCandidates = Iterables.filter(values, FuzzyEqualsFilter(fullPrice.value / otherValue.value));
+                if (!Iterables.isEmpty(volumeCandidates)) {
+                    if (!configuration.isValidGasolinePricePerLitre(Iterables.getFirst(Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(volumeCandidates, null).value)), null).value)
+                            && configuration.isValidGasolinePricePerLitre(otherValue.value)) {
+                        volumeResult = new Value(ValueType.VOLUME, Iterables.getFirst(Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(volumeCandidates, null).value)), null).value, true);
+                        pricePerLitreResult = new Value(ValueType.PRICE_PER_LITRE, otherValue.value, true);
+                    } else if (configuration.isValidGasolinePricePerLitre(Iterables.getFirst(Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(volumeCandidates, null).value)), null).value)) {
+                        pricePerLitreResult = new Value(ValueType.PRICE_PER_LITRE, Iterables.getFirst(Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(volumeCandidates, null).value)), null).value, true);
+                        volumeResult = new Value(ValueType.VOLUME, otherValue.value, true);
+                    }
+                    if (volumeResult != null && pricePerLitreResult != null) {
+                        return ImmutableList.of(fullPrice,
+                                volumeResult,
+                                pricePerLitreResult);
+                    }
+                }
+            }
+            for (final Value otherValue : values) {
+                if (otherValue.type == ValueType.PRICE && configuration.isValidGasolinePricePerLitre(otherValue.value)) {
+                    pricePerLitreResult = new Value(ValueType.PRICE_PER_LITRE, otherValue.value, false);
+                }
+            }
+            if (pricePerLitreResult != null) {
+                return ImmutableList.of(fullPrice, new Value(ValueType.VOLUME, fullPrice.value / pricePerLitreResult.value, false), pricePerLitreResult);
+            }
+        } else if (volume != null) {
+            Value pricePerLitreResult = null;
+            Value fullPriceResult = null;
+            for (final Value otherValue : values) {
+                Iterable<Value> fullPriceCandidates = Iterables.filter(values, FuzzyEqualsFilter(volume.value * otherValue.value));
+                if (!Iterables.isEmpty(fullPriceCandidates)) {
+                    fullPriceResult = new Value(ValueType.VOLUME, Iterables.getFirst(Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(fullPriceCandidates, null).value)), null).value, true);
+                    pricePerLitreResult = new Value(ValueType.PRICE_PER_LITRE, otherValue.value, true);
+                    return ImmutableList.of(fullPriceResult,
+                            volume,
+                            pricePerLitreResult);
+
+                }
+            }
+        }
+
+        if (values.size() >= 3) {
+            for (final Value value : Lists.newArrayList(values)) {
+                for (final Value otherValue : values) {
+                    if (value.value != otherValue.value) {
+                        Iterable<Value> multiplied = Iterables.filter(values, FuzzyEqualsFilter(value.value * otherValue.value));
+                        if (!Iterables.isEmpty(multiplied)) {
+                            Value pricePerLitreResult = null;
+                            Value volumeResult = null;
+                            Value fullPriceResult = new Value(ValueType.FULL_PRICE, Iterables.getFirst(Iterables.filter(values, FuzzyEqualsFilter(Iterables.getFirst(multiplied, null).value)), null).value, true);
+                            if (configuration.isValidGasolinePricePerLitre(value.value)) {
+                                pricePerLitreResult = new Value(ValueType.PRICE_PER_LITRE, value.value, true);
+                                volumeResult = new Value(ValueType.VOLUME, otherValue.value, true);
+                            } else {
+                                pricePerLitreResult = new Value(ValueType.PRICE_PER_LITRE, otherValue.value, true);
+                                volumeResult = new Value(ValueType.VOLUME, value.value, true);
+                            }
+                            if (configuration.isValidGasolinePricePerLitre(pricePerLitreResult.value)) {
+                                return ImmutableList.of(fullPriceResult, volumeResult, pricePerLitreResult);
                             }
                         }
                     }
                 }
             }
-        } else {
-            if ((pricePerLitre == null && fullPrice == null) || (pricePerLitre == null && volume == 0) || (fullPrice == null && volume == 0)) {
-                otherValues = Ordering.natural().reverse().sortedCopy(Sets.newHashSet(otherValues));
-                for (float value : otherValues) {
-                    if (configuration.isValidReFuelFullPrice(value) && fullPrice == null) {
-                        fullPrice = new Price(false, value, false);
-                    } else if (configuration.isValidGasolineVolume(value) && volume == 0) {
-                        volume = value;
-                    } else if (configuration.isValidGasolinePricePerLitre(value)) {
-                        pricePerLitre = new Price(true, value, false);
-                    }
-
-                }
-                if (fullPrice != null && pricePerLitre != null && volume > 0) {
-                    if (pricePerLitre.value * volume != fullPrice.value) {
-                        float test1 = pricePerLitre.value * fullPrice.value;
-                        if ((volume *10 * 0.95) <=  test1 && test1 <= (volume * 10 * 1.05)) {
-                            float tempVolume = fullPrice.value;
-                            fullPrice.value = volume * 10;
-                            volume = tempVolume;
-                        }
-                    }
-                }
-            }
         }
 
-        float volumeEstimate = 0;
-        if (fullPrice != null && pricePerLitre != null) {
-            volumeEstimate = fullPrice.value / pricePerLitre.value;
-        }
-
-        for (int index = 0; index < 3; index++) {
-            for (final float value : otherValues) {
-                if (configuration.isValidGasolineVolume(value)) {
-                    if (volumeEstimate == 0 || ((volumeEstimate * 0.9) < value && value < (volumeEstimate * 1.1))) {
-                        if (volume == 0) volume = value;
-                    }
-                }
-                if (configuration.isValidGasolinePricePerLitre(value) && pricePerLitre == null) {
-                    pricePerLitre = new Price(true, value, false);
-                    if (fullPrice != null) {
-                        volumeEstimate = fullPrice.value / pricePerLitre.value;
-                    }
-                }
-                if (configuration.isValidReFuelFullPrice(value) && fullPrice == null) {
-                    fullPrice = new Price(false, value, false);
-                }
-            }
-        }
-
-        if (pricePerLitre != null) {
-            if (volumeEstimate == 0) {
-                volumeEstimate = fullPrice.value / pricePerLitre.value;
-            }
-            if (volume == 0 || ((volumeEstimate * 0.9) > volume || volume > (volumeEstimate * 1.1))) {
-                volume = volumeEstimate;
-            }
-        }
-
-        final float resultVolume = volume;
-        final float resultPrice;
+        // Price per litre is not available in values
         if (fullPrice != null) {
-            resultPrice = fullPrice.value;
-        } else {
-            resultPrice = 0;
-        }
-        final float resultPricePerLitre;
-        if (pricePerLitre != null) {
-            resultPricePerLitre = pricePerLitre.value;
-        } else {
-            if (resultPrice > 0 && resultVolume > 0 && configuration.isValidGasolinePricePerLitre(resultPrice / resultVolume)) {
-                resultPricePerLitre = resultPrice / resultVolume;
-            } else {
-                resultPricePerLitre = 0;
+            for (final Value value : values) {
+                if (configuration.isValidGasolinePricePerLitre(fullPrice.value / value.value)) {
+                    return ImmutableList.of(
+                            fullPrice,
+                            new Value(ValueType.VOLUME, value.value, false),
+                            new Value(ValueType.PRICE_PER_LITRE, fullPrice.value / value.value, false)
+                    );
+                }
+            }
+            for (final Value value : values) {
+                if (configuration.isValidGasolinePricePerLitre(value.value)) {
+                    return ImmutableList.of(
+                            fullPrice,
+                            new Value(ValueType.VOLUME, fullPrice.value / value.value, false),
+                            new Value(ValueType.PRICE_PER_LITRE, value.value, false)
+                    );
+                }
             }
         }
 
-        return Optional.of(new BasicVehicleImageData(image, resultVolume, resultVolume > 0, resultPrice, resultPrice > 0, resultPricePerLitre, resultPricePerLitre > 0));
+        return Ordering.natural().reverse().onResultOf(new Function<Value, Float>() {
+            @Nullable
+            @Override
+            public Float apply(@Nullable Value value) {
+                return value.value;
+            }
+        }).sortedCopy(values);
+    }
+
+    private Function<Value, Value> Multiply(final float test) {
+        return new Function<Value, Value>() {
+            @Nullable
+            @Override
+            public Value apply(@Nullable Value value) {
+                return new Value(value.type, value.value * test, false);
+            }
+        };
+    }
+
+    private Function<Value, Value> Divide(final float test) {
+        return new Function<Value, Value>() {
+            @Nullable
+            @Override
+            public Value apply(@Nullable Value value) {
+                return new Value(value.type, value.value / test, false);
+            }
+        };
+    }
+
+    private Predicate<Value> FuzzyEqualsFilter(final Float test) {
+        return new Predicate<Value>() {
+            @Override
+            public boolean apply(@Nullable Value value) {
+                return fuzzyEquals(test, value.value);
+            }
+        };
+    }
+
+    private boolean fuzzyEquals(final Float test, final Float value) {
+        if (test == 0 && value == 0) {
+            return true;
+        }
+        return (test * 0.95) < value && value < (test * 1.05);
     }
 
     private boolean hasValidFuelPricePerLitre(final Iterable<Float> values) {
@@ -232,60 +406,93 @@ public class FuelOCRParser {
         return false;
     }
 
-    private Optional<Float> getFloatValue(final String test) {
+    private List<Value> getFloatValue(final String test) {
         final Matcher matcher = DISPLAY_FLOAT_PATTERN.matcher(test);
         if (matcher.find() && matcher.matches()) {
             final String numberValue = StringUtils.replace(StringUtils.trim(matcher.group(1)), " ", "");
             if (StringUtils.containsIgnoreCase(numberValue, ".")) {
                 final Float result = Float.parseFloat(StringUtils.trim(numberValue));
-                return Optional.of(result);
+                return ImmutableList.of(new Value(guessType(test), result, true));
             } else if (StringUtils.containsIgnoreCase(numberValue, ",")) {
                 final Float result = Float.parseFloat(StringUtils.trim(StringUtils.replace(numberValue, ",", ".")));
-                return Optional.of(result);
+                return ImmutableList.of(new Value(guessType(test), result, true));
             }
             if (StringUtils.contains(numberValue, " ")) {
-                return Optional.of(Float.parseFloat(StringUtils.split(numberValue, " ")[0] + "." + StringUtils.split(numberValue, " ")[1]));
+                return ImmutableList.of(new Value(guessType(test), Float.parseFloat(StringUtils.split(numberValue, " ")[0] + "." + StringUtils.split(numberValue, " ")[1]), true));
             }
             if (numberValue.length() == 4) {
                 if (StringUtils.startsWith(numberValue, "1")) {
                     final Float result = Float.parseFloat(StringUtils.substring(numberValue, 0, 1) + "." + StringUtils.substring(numberValue, 1));
                     if (configuration.isValidGasolinePricePerLitre(result)) {
-                        return Optional.of(result);
+                        return ImmutableList.of(new Value(guessType(test), result, false), new Value(guessType(test), result * 10, false));
                     }
                 }
                 final Float result = Float.parseFloat(StringUtils.substring(numberValue, 0, 2) + "." + StringUtils.substring(numberValue, 2));
-                return Optional.of(result);
+                return ImmutableList.of(new Value(guessType(test), result, false), new Value(guessType(test), result / 10, false));
             }
             if (numberValue.length() == 3) {
                 final Float result = Float.parseFloat(StringUtils.substring(numberValue, 0, 1) + "." + StringUtils.substring(numberValue, 1));
-                return Optional.of(result);
+                return ImmutableList.of(new Value(guessType(test), result, false), new Value(guessType(test), result * 10, false));
             }
         }
-        return Optional.absent();
+        return Collections.emptyList();
     }
 
-    private static class Price {
-        private boolean isPricePerLitre = false;
+    private ValueType guessType(final String test) {
+        if (Pattern.compile("[0-9]+\\s*[€e]+.*").matcher(test).matches()) {
+            return ValueType.PRICE;
+        }
+        if (StringUtils.containsIgnoreCase(test, "LITR")) {
+            return ValueType.VOLUME;
+        }
+        return ValueType.UNKNOWN;
+    }
+
+    private enum ValueType {
+        PRICE(true),
+        FULL_PRICE(true),
+        PRICE_PER_LITRE(true),
+        VOLUME(false),
+        UNKNOWN(false);
+
+        private final boolean price;
+
+        ValueType(boolean price) {
+            this.price = price;
+        }
+
+        public boolean isPrice() {
+            return this.price;
+        }
+
+    }
+
+    private static class Value {
+        private ValueType type;
         private float value = 0f;
         private boolean trusted = false;
 
-        public Price(boolean isPricePerLitre, float value, boolean trusted) {
-            this.isPricePerLitre = isPricePerLitre;
+        public Value(ValueType type, float value, boolean trusted) {
+            this.type = type;
             this.value = value;
-            this.trusted = trusted;
+            if (type == ValueType.VOLUME) {
+                this.trusted = true;
+            } else {
+                this.trusted = false;
+            }
         }
 
         @Override
         public String toString() {
-            return "Price{" +
-                    "isPricePerLitre=" + isPricePerLitre +
+            return "Value{" +
+                    "type=" + type +
                     ", value=" + value +
                     ", trusted=" + trusted +
                     '}';
         }
     }
 
-    private Optional<Price> getPrice(final String test) {
+    private List<Value> getPrice(final String test) {
         final Matcher degragedPriceMatcher = PRICE_PATTERN_DEGRAGED.matcher(test);
         if (degragedPriceMatcher.matches()) {
             String parsedValue = StringUtils.replace(test, ",", ".");
@@ -298,12 +505,11 @@ public class FuelOCRParser {
             if (StringUtils.indexOf(parsedValue, " ") == 1) {
                 parsedValue = StringUtils.substring(parsedValue, 0, 1) + "." + StringUtils.substring(parsedValue, 1);
             }
-            parsedValue =
             parsedValue = StringUtils.remove(parsedValue, " ");
             if (StringUtils.startsWith(parsedValue, "1")) {
-                return Optional.of(new Price(true, Float.parseFloat(parsedValue), true));
+                return ImmutableList.of(new Value(ValueType.PRICE_PER_LITRE, Float.parseFloat(parsedValue), true));
             } else if (StringUtils.startsWith(parsedValue, ".")) {
-                return Optional.of(new Price(true, Float.parseFloat("1" + parsedValue), true));
+                return ImmutableList.of(new Value(ValueType.PRICE_PER_LITRE, Float.parseFloat("1" + parsedValue), true));
             }
         }
 
@@ -318,34 +524,33 @@ public class FuelOCRParser {
             }
             if (value > 0) {
                 if (StringUtils.containsIgnoreCase(test, "litr")) {
-                    return Optional.of(new Price(true, value, true));
+                    return ImmutableList.of(new Value(ValueType.PRICE_PER_LITRE, value, true));
                 } else {
-                    if (value > 1 && value < 2) {
-                        return Optional.of(new Price(true, value, true));
-                    }
-                    return Optional.of(new Price(false, value, true));
+                    return ImmutableList.of(new Value(ValueType.PRICE, value, true));
                 }
             }
             if (StringUtils.startsWith(numberValue, "1")) {
                 value = Float.parseFloat(StringUtils.substring(numberValue, 0, 1) + "." + StringUtils.substring(numberValue, 1));
-                return Optional.of(new Price(true, value, true));
+                return ImmutableList.of(new Value(ValueType.PRICE, value, false), new Value(ValueType.PRICE, value * 10, false));
             } else {
                 if (numberValue.length() == 4) {
                     value = Float.parseFloat(StringUtils.substring(numberValue, 0, 2) + "." + StringUtils.substring(numberValue, 2));
-                    return Optional.of(new Price(false, value, true));
+                    return ImmutableList.of(new Value(ValueType.PRICE, value, false));
                 }
                 if (numberValue.length() == 3) {
                     value = Float.parseFloat(StringUtils.substring(numberValue, 0, 1) + "." + StringUtils.substring(numberValue, 1));
-                    return Optional.of(new Price(false, value, true));
+                    return ImmutableList.of(new Value(ValueType.PRICE, value, false), new Value(ValueType.PRICE, value * 10, false));
                 }
             }
         }
-        return Optional.absent();
+        return Collections.emptyList();
     }
 
     private static class BasicVehicleImageData implements VehicleImageData {
 
         private final AnnotatedImage source;
+
+        private final String uuid;
 
         private final float odometerValue;
         private final float volume;
@@ -357,8 +562,23 @@ public class FuelOCRParser {
         private final boolean hasPrice;
         private final boolean hasPricePerLitre;
 
-        private BasicVehicleImageData(AnnotatedImage source, float odometerValue) {
+        private BasicVehicleImageData(AnnotatedImage source, String uuid) {
             this.source = source;
+            this.uuid = uuid;
+            this.odometerValue = 0;
+            this.hasOdometerValue = false;
+
+            this.volume = 0;
+            this.price = 0;
+            this.pricePerLitre = 0;
+            this.hasVolume = false;
+            this.hasPrice = false;
+            this.hasPricePerLitre = false;
+        }
+
+        private BasicVehicleImageData(AnnotatedImage source, String uuid, float odometerValue) {
+            this.source = source;
+            this.uuid = uuid;
             this.odometerValue = odometerValue;
             this.hasOdometerValue = true;
 
@@ -370,8 +590,9 @@ public class FuelOCRParser {
             this.hasPricePerLitre = false;
         }
 
-        private BasicVehicleImageData(AnnotatedImage source, float volume, boolean hasVolume, float price, boolean hasPrice, float pricePerLitre, boolean hasPricePerLitre) {
+        private BasicVehicleImageData(AnnotatedImage source, String uuid, float volume, boolean hasVolume, float price, boolean hasPrice, float pricePerLitre, boolean hasPricePerLitre) {
             this.source = source;
+            this.uuid = uuid;
             this.odometerValue = 0;
             this.hasOdometerValue = false;
 
@@ -382,6 +603,11 @@ public class FuelOCRParser {
             this.hasPrice = hasPrice;
             this.hasPricePerLitre = hasPricePerLitre;
 
+        }
+
+        @Override
+        public String getUUID() {
+            return uuid;
         }
 
         @Override
@@ -436,12 +662,46 @@ public class FuelOCRParser {
 
         @Override
         public float getLatitude() {
+            if (StringUtils.isEmpty(source.getLatitude())) {
+                return 0;
+            }
             return new GPSLatitudeSensorRecord("UUID", source.getDateTaken(), source.getLatitudeRef(), source.getLatitude()).getValue();
         }
 
         @Override
         public float getLongitude() {
+            if (StringUtils.isEmpty(source.getLongitude())) {
+                return 0;
+            }
             return new GPSLongitudeSensorRecord("UUID", source.getDateTaken(), source.getLongitudeRef(), source.getLongitude()).getValue();
+        }
+
+        @Override
+        public float getAltitude() {
+            if (StringUtils.isNotEmpty(source.getAltitude()) && StringUtils.containsIgnoreCase(source.getAltitude(), " metres")) {
+                return Float.parseFloat(StringUtils.remove(source.getAltitude(), " metres"));
+            }
+            return 0;
+        }
+
+        @Override
+        public VehicleImageData getImageData() {
+            return this;
+        }
+
+        @Override
+        public float getValue() {
+            return 0;
+        }
+
+        @Override
+        public String getSensorUUID() {
+            return "uuid";
+        }
+
+        @Override
+        public SensorUnit getUnit() {
+            return SensorUnit.POSITION;
         }
 
         @Override
@@ -464,6 +724,14 @@ public class FuelOCRParser {
         public int hashCode() {
             return Objects.hash(source, getOdometerValue(), getVolume(), getPrice(), getPricePerLitre(), hasOdometerValue, hasVolume, hasPrice, hasPricePerLitre);
         }
+
+        @Override
+        public String toString() {
+            return "BasicVehicleImageData{" +
+                    "date=" + source.getDateTaken() +
+                    ", fileName=" + source.getFileName() +
+                    '}';
+        }
     }
 
     public static void main(String[] args) throws JAXBException, IOException {
@@ -481,21 +749,145 @@ public class FuelOCRParser {
         System.out.println(new FuelOCRParser(CarConfigurationHelper.getPeugeot305()).getPrice(",759 "));
         System.out.println(new FuelOCRParser(CarConfigurationHelper.getPeugeot305()).getPrice(",759 e"));
         System.out.println(new FuelOCRParser(CarConfigurationHelper.getPeugeot305()).getPrice("1 759 e"));
-        final ImageAnnotator.AnnotatedImageBatch batch = JAXBUtils.unmarshal(ImageAnnotator.AnnotatedImageBatch.class, new File("/Users/corentin/Documents/Developpement/image-annotations.xml"));
+        final ImageAnnotator.AnnotatedImageBatch batch = JAXBUtils.unmarshal(ImageAnnotator.AnnotatedImageBatch.class, ConfigurationUtils.getAnnotationsFile());
 
-        System.out.println("\"FileName\",\"DateTaken\",\"Volume\",\"PricePerLitre\",\"Price\"");
-       for (final VehicleImageData vehicleImageData : new FuelOCRParser(CarConfigurationHelper.getPeugeot305()).analyzeImages(batch.getAnnotatedImages())) {
-/*            System.out.println("FileName:" + fuelStatistics.getFileName());
-            System.out.println("DateTaken:" + fuelStatistics.getDateTaken());
-            System.out.println("Price per litre:" + fuelStatistics.getPricePerLitre() + "€/L");
-            System.out.println("Price:" + fuelStatistics.getPrice() + "€");
-            System.out.println("Volume:" + fuelStatistics.getVolume() + "L");
-            System.out.println("_______________________________________________________________");*/
-            System.out.println("\"" + vehicleImageData.getFileName() + "\",\"" + vehicleImageData.getDateTaken() + "\"," + vehicleImageData.getVolume() + "," + vehicleImageData.getPricePerLitre() + "," + vehicleImageData.getPrice());
+        final LineIterator lineIterator = new LineIterator(new InputStreamReader(new FileInputStream(new File(ConfigurationUtils.getStorageDir(), "awaited-results.csv"))));
+
+        final Map<String, VehicleImageData> awaitedResults = Maps.newHashMap();
+        final Set<String> validFileNames = Sets.newHashSet();
+        if (lineIterator.hasNext()) lineIterator.nextLine();
+        while (lineIterator.hasNext()) {
+
+            final String[] splits = StringUtils.split(lineIterator.nextLine(), ",");
+            if (splits.length >= 6) {
+                final String fileName = splits[0];
+                final LocalDateTime dateTime = new LocalDateTime(splits[1]);
+                final Float volume = Float.parseFloat(splits[2]);
+                final Float pricePerLitre = Float.parseFloat(splits[3]);
+                final Float fullPrice = Float.parseFloat(splits[4]);
+                if ("OK".equals(splits[5])) {
+                    validFileNames.add(fileName);
+                }
+                awaitedResults.put(fileName, new VehicleImageData() {
+
+                    @Override
+                    public String getUUID() {
+                        return null;
+                    }
+
+                    @Override
+                    public float getOdometerValue() {
+                        return 0;
+                    }
+
+                    @Override
+                    public float getVolume() {
+                        return volume;
+                    }
+
+                    @Override
+                    public float getPrice() {
+                        return fullPrice;
+                    }
+
+                    @Override
+                    public float getPricePerLitre() {
+                        return pricePerLitre;
+                    }
+
+                    @Override
+                    public boolean hasVolume() {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean hasPrice() {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean hasPricePerLitre() {
+                        return true;
+                    }
+
+                    @Override
+                    public boolean hasOdometerValue() {
+                        return false;
+                    }
+
+                    @Override
+                    public String getFileName() {
+                        return fileName;
+                    }
+
+                    @Override
+                    public LocalDateTime getDateTaken() {
+                        return dateTime;
+                    }
+
+                    @Override
+                    public float getLatitude() {
+                        return 0;
+                    }
+
+                    @Override
+                    public float getLongitude() {
+                        return 0;
+                    }
+
+                    @Override
+                    public float getAltitude() {
+                        return 0;
+                    }
+
+                    @Override
+                    public VehicleImageData getImageData() {
+                        return this;
+                    }
+
+                    @Override
+                    public float getValue() {
+                        return 0;
+                    }
+
+                    @Override
+                    public String getSensorUUID() {
+                        return "uuid";
+                    }
+
+                    @Override
+                    public SensorUnit getUnit() {
+                        return SensorUnit.POSITION;
+                    }
+                });
+            }
         }
 
+       final FileOutputStream fileOutputStream = new FileOutputStream(new File(ConfigurationUtils.getStorageDir(), "test.csv"));
+        fileOutputStream.write("\"FileName\",\"DateTaken\",\"OdometerValue\",\"Volume\",\"PricePerLitre\",\"Price\"".getBytes());
+        FuelOCRParser parser = new FuelOCRParser(CarConfigurationHelper.getPeugeot305());
+       for (final VehicleImageData vehicleImageData : parser.analyzeImages(batch.getAnnotatedImages())) {
+            if (vehicleImageData.getOdometerValue() == 0) {
+                if (awaitedResults.containsKey(vehicleImageData.getFileName())) {
+                    if (parser.fuzzyEquals(awaitedResults.get(vehicleImageData.getFileName()).getVolume(), vehicleImageData.getVolume())
+                            && parser.fuzzyEquals(awaitedResults.get(vehicleImageData.getFileName()).getPricePerLitre(), vehicleImageData.getPricePerLitre())
+                            && parser.fuzzyEquals(awaitedResults.get(vehicleImageData.getFileName()).getPrice(), vehicleImageData.getPrice())) {
+                        //System.out.println("OK[" + vehicleImageData.getFileName() + "]");
+                        if (!validFileNames.contains(vehicleImageData.getFileName())) {
+                            System.out.println("UPGRADE[" + vehicleImageData.getFileName() + "]" + "\"" + vehicleImageData.getDateTaken() + "\"," + vehicleImageData.getOdometerValue() + "," + vehicleImageData.getVolume() + "," + vehicleImageData.getPricePerLitre() + "," + vehicleImageData.getPrice());
+                        }
+                    } else if (validFileNames.contains(vehicleImageData.getFileName())) {
+                        System.out.println("\"" + vehicleImageData.getFileName() + "\",\"" + vehicleImageData.getDateTaken() + "\"," + vehicleImageData.getOdometerValue() + "," + vehicleImageData.getVolume() + "," + vehicleImageData.getPricePerLitre() + "," + vehicleImageData.getPrice());
+                        fileOutputStream.write(new String("\"" + vehicleImageData.getFileName() + "\",\"" + vehicleImageData.getDateTaken() + "\"," + vehicleImageData.getOdometerValue() + "," + vehicleImageData.getVolume() + "," + vehicleImageData.getPricePerLitre() + "," + vehicleImageData.getPrice() + "\n").getBytes());
+                    }
+                } else {
+                    System.out.println("Unknown file date : '" + vehicleImageData.getFileName() + "'");
+                }
+            }
+        }
+        fileOutputStream.close();
         for (final AnnotatedImage image : batch.getAnnotatedImages()) {
-            if ("DSC_0625.JPG".equals(image.getFileName())) {
+            if ("DSC_2706.JPG".equals(image.getFileName())) {
                 new FuelOCRParser(CarConfigurationHelper.getPeugeot305()).analyzeImage(image);
             }
         }

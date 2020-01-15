@@ -1,9 +1,12 @@
 package com.desi.data.bean;
 
+import com.desi.data.CarSensorRecord;
 import org.joda.time.LocalDate;
 import org.joda.time.LocalDateTime;
 
-public interface VehicleImageData {
+public interface VehicleImageData extends CarSensorRecord {
+
+    public String getUUID();
 
     public float getOdometerValue();
 
@@ -28,5 +31,7 @@ public interface VehicleImageData {
     public float getLatitude();
 
     public float getLongitude();
+
+    public float getAltitude();
 
 }

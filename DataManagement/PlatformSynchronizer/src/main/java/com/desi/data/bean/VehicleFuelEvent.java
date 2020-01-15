@@ -1,13 +1,14 @@
 package com.desi.data.bean;
 
 
+import com.desi.data.CarSensorRecord;
 import com.desi.data.SensorRecord;
 import com.desi.data.SensorUnit;
 import org.joda.time.LocalDateTime;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
 
-public class VehicleFuelEvent implements SensorRecord, Exportable {
+public class VehicleFuelEvent implements CarSensorRecord, Exportable {
 
     private DateTimeFormatter DATETIME_FORMAT = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm");
 
@@ -25,11 +26,13 @@ public class VehicleFuelEvent implements SensorRecord, Exportable {
 
     private final float consumption;
 
-    private final float latitude;
+    private final VehicleImageData startImageData;
 
-    private final float longitude;
+    private final VehicleImageData endImageData;
 
-    public VehicleFuelEvent(String uuid, LocalDateTime dateTime, float odometerValue, float fuelVolume, float fuelPrice, float distance, float consumption, float latitude, float longitude) {
+    public VehicleFuelEvent(VehicleImageData startImageData, VehicleImageData endImageData, String uuid, LocalDateTime dateTime, float odometerValue, float fuelVolume, float fuelPrice, float distance, float consumption) {
+        this.startImageData = startImageData;
+        this.endImageData = endImageData;
         this.uuid = uuid;
         this.dateTime = dateTime;
         this.odometerValue = odometerValue;
@@ -37,8 +40,6 @@ public class VehicleFuelEvent implements SensorRecord, Exportable {
         this.fuelPrice = fuelPrice;
         this.distance = distance;
         this.consumption = consumption;
-        this.latitude = latitude;
-        this.longitude = longitude;
     }
 
     public String getUuid() {
@@ -70,11 +71,36 @@ public class VehicleFuelEvent implements SensorRecord, Exportable {
     }
 
     public float getLatitude() {
-        return latitude;
+        if (endImageData == null) return 0;
+        return endImageData.getLatitude();
     }
 
     public float getLongitude() {
-        return longitude;
+        if (endImageData == null) return 0;
+        return endImageData.getLongitude();
+    }
+
+    public float getAltitude() {
+        if (endImageData == null) return 0;
+        return endImageData.getAltitude();
+    }
+
+    @Override
+    public String getFileName() {
+        return endImageData.getFileName();
+    }
+
+    @Override
+    public VehicleImageData getImageData() {
+        return endImageData;
+    }
+
+    public VehicleImageData getStartImageData() {
+        return startImageData;
+    }
+
+    public VehicleImageData getEndImageData() {
+        return endImageData;
     }
 
     @Override

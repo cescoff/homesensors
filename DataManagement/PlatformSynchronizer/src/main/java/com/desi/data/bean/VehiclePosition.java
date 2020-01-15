@@ -16,8 +16,11 @@ public class VehiclePosition implements SensorRecord, Exportable  {
 
     private final float speed;
 
-    public VehiclePosition(String uuid, LocalDateTime dateTime, float latitude, float longitude, float speed) {
+    private final String fileName;
+
+    public VehiclePosition(String uuid, String fileName, LocalDateTime dateTime, float latitude, float longitude, float speed) {
         this.uuid = uuid;
+        this.fileName = fileName;
         this.dateTime = dateTime;
         this.latitude = latitude;
         this.longitude = longitude;
@@ -60,6 +63,10 @@ public class VehiclePosition implements SensorRecord, Exportable  {
         return SensorUnit.POSITION;
     }
 
+    public String getFileName() {
+        return fileName;
+    }
+
     @Override
     public String toCSVLine() {
         return "";
@@ -71,4 +78,15 @@ public class VehiclePosition implements SensorRecord, Exportable  {
         return result.toString();
     }
 
+    @Override
+    public String toString() {
+        return "VehiclePosition{" +
+                "uuid='" + uuid + '\'' +
+                ", dateTime=" + dateTime +
+                ", latitude=" + latitude +
+                ", longitude=" + longitude +
+                ", speed=" + speed +
+                ", fileName='" + fileName + '\'' +
+                '}';
+    }
 }

@@ -1,14 +1,13 @@
 package com.desi.data.bigquery;
 
 import com.desi.data.*;
-import com.desi.data.bean.DefaultAggregatedSensorRecord;
-import com.desi.data.bean.DefaultHeatingLevelRecord;
-import com.desi.data.bean.TemperatureRecord;
+import com.desi.data.bean.*;
 import com.desi.data.config.PlatformCredentialsConfig;
 import com.desi.data.impl.StaticSensorNameProvider;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.bigquery.*;
+import com.google.cloud.bigquery.Table;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
@@ -32,11 +31,17 @@ public class BigQueryConnector implements Connector {
 
     private static final Logger logger = LoggerFactory.getLogger(BigQueryConnector.class);
 
+    private static final Class[] SPECIFIC_TABLE_RECORDS = new Class[] {VehicleFuelEvent.class, VehiclePosition.class};
+
     private static final LocalDateTime DEFAULT_CHECKPOINT_VALUE = LocalDateTime.parse("2019-11-4T00:00:00");
 
     private static final String DATASET_NAME_PARAMETER = "${DATASET}";
 
     private static final String SENSOR_RECORDS_TABLE_NAME = "SensorData";
+
+    private static final String FUEL_EVENT_TABLE_NAME = "VehicleFuelEvent";
+
+    private static final String POSITION_TABLE_NAME = "VehiclePosition";
 
     private static final String AGGREGATED_SENSOR_RECORDS_TABLE_NAME = "SensorDataAggregated";
 
@@ -52,7 +57,11 @@ public class BigQueryConnector implements Connector {
 
     private static final String CHECKPOINT_ATTRIBUTE_NAME = "checkpoint";
 
-    private static final String GET_WITHOUT_DATASET_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME_PARAMETER + ".SensorData records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
+    private static final String GET_WITHOUT_DATASET_RAW_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME_PARAMETER + ".SensorData records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
+
+    private static final String GET_WITHOUT_DATASET_FUEL_EVENT_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME_PARAMETER + "." + FUEL_EVENT_TABLE_NAME + " records WHERE records.uuid=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
+
+    private static final String GET_WITHOUT_DATASET_POSITION_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME_PARAMETER + "." + POSITION_TABLE_NAME + " records WHERE records.uuid=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
 
     private static final String GET_WITHOUT_DATASET_AGGREGATED_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME_PARAMETER + ".SensorDataAggregated records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\" AND AggregationScope=" + AGGREGATION_SCOPE_PARAMETER;
 
@@ -110,19 +119,33 @@ public class BigQueryConnector implements Connector {
         return true;
     }
 
+    private static Predicate<SensorRecord> RAW_TABLE_RECORDS = new Predicate<SensorRecord>() {
+        @Override
+        public boolean apply(@Nullable SensorRecord sensorRecord) {
+            for (final Class<?> clazz : SPECIFIC_TABLE_RECORDS) {
+                if (clazz.equals(sensorRecord.getClass())) {
+                    return false;
+                }
+            }
+            return true;
+        }
+    };
+
     @Override
     public boolean addRecords(Iterable<SensorRecord> records, SensorNameProvider nameProvider) throws Exception {
+        final Iterable<SensorRecord> rawRecords = Iterables.filter(records, RAW_TABLE_RECORDS);
+        final Iterable<VehicleFuelEvent> fuelEvents = Iterables.filter(records, VehicleFuelEvent.class);
+        final Iterable<VehiclePosition> positions = Iterables.filter(records, VehiclePosition.class);
 
         final TableId rawDataTableId = bigQuery.getTable(dataSetName, SENSOR_RECORDS_TABLE_NAME).getTableId();
 
         logger.info("Got table id '" + rawDataTableId + "'");
 
-        int addedVakues = Iterables.size(records);
-
+        int addedVakues = Iterables.size(rawRecords);
 
 
 //        for (final Iterable<SensorRecord> page : Iterables.partition(Iterables.filter(records, incrementalFilter(records)), 10000)) {
-        for (final Iterable<SensorRecord> page : Iterables.partition(records, 10000)) {
+        for (final Iterable<SensorRecord> page : Iterables.partition(rawRecords, 10000)) {
             final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(rawDataTableId);
 
             for (final SensorRecord record : page) {
@@ -147,55 +170,114 @@ public class BigQueryConnector implements Connector {
                 return false;
             }
         }
-        logger.info("Added " + addedVakues + " elements to BigQuery");
+        logger.info("Added " + addedVakues + " raw elements to BigQuery");
 
-        logger.info("Performing aggregations");
+        if (!addFuelEvents(fuelEvents)) {
+            logger.error("Failed to add fuel events");
+            return false;
+        }
 
-        final TableId aggregatedDataTableId = bigQuery.getTable(dataSetName, AGGREGATED_SENSOR_RECORDS_TABLE_NAME).getTableId();
-        for (final String sensorId : getAllSensorIds()) {
-            for (final AggregationScope scope : AggregationScope.values()) {
-                logger.info("Performing '" + scope.name() + "' aggregation for sensor '" + sensorId + "'");
-                final Iterable<AggregatedSensorRecord> aggregatedSensorRecords = getAggregatedValues(sensorId, scope);
-                logger.info("Found " + Iterables.size(aggregatedSensorRecords) + " aggregated records for sensor '" + sensorId + "' on scope '" + scope.name() + "'");
+        if (!addVehiclePositions(positions)) {
+            logger.error("Failed to add vehicule positions");
+            return false;
+        }
 
-                for (final Iterable<AggregatedSensorRecord> page : Iterables.partition(aggregatedSensorRecords, 10000)) {
-                    final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(aggregatedDataTableId);
 
-                    for (final AggregatedSensorRecord aggregatedSensorRecord : page) {
-                        insertAllRequest.addRow(ImmutableMap.<String, String>builder().
-                                put("SensorId", sensorId).
-                                put("DateTime", aggregatedSensorRecord.getPeriodEnd().toString()).
-                                put("Date", aggregatedSensorRecord.getPeriodEnd().getYear() + "-" + aggregatedSensorRecord.getPeriodEnd().getMonthOfYear() + "-" + aggregatedSensorRecord.getPeriodEnd().getDayOfMonth()).
-                                put("Value", formatFloat(aggregatedSensorRecord.getSensorValue(sensorId))).
-                                put("AggregationScope", "" + scope.id()).build());
-                    }
+        final Table aggregatedDataTable = bigQuery.getTable(dataSetName, AGGREGATED_SENSOR_RECORDS_TABLE_NAME);
 
-                    final InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest.build());
-                    final Map<Long, List<BigQueryError>> errors = insertAllResponse.getInsertErrors();
-                    if (errors != null && errors.size() > 0) {
-                        for (final Long aLong : errors.keySet()) {
-                            for (final BigQueryError error : errors.get(aLong)) {
-                                logger.error("INSERT ERROR : '" + error.toString() + "'");
-                            }
+        if (aggregatedDataTable != null) {
+            logger.info("Performing aggregations");
+
+            final TableId aggregatedDataTableId = aggregatedDataTable.getTableId();
+            for (final String sensorId : getAllSensorIds()) {
+                for (final AggregationScope scope : AggregationScope.values()) {
+                    logger.info("Performing '" + scope.name() + "' aggregation for sensor '" + sensorId + "'");
+                    final Iterable<AggregatedSensorRecord> aggregatedSensorRecords = getAggregatedValues(sensorId, scope);
+                    logger.info("Found " + Iterables.size(aggregatedSensorRecords) + " aggregated records for sensor '" + sensorId + "' on scope '" + scope.name() + "'");
+
+                    for (final Iterable<AggregatedSensorRecord> page : Iterables.partition(aggregatedSensorRecords, 10000)) {
+                        final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(aggregatedDataTableId);
+
+                        for (final AggregatedSensorRecord aggregatedSensorRecord : page) {
+                            insertAllRequest.addRow(ImmutableMap.<String, String>builder().
+                                    put("SensorId", sensorId).
+                                    put("DateTime", aggregatedSensorRecord.getPeriodEnd().toString()).
+                                    put("Date", aggregatedSensorRecord.getPeriodEnd().getYear() + "-" + aggregatedSensorRecord.getPeriodEnd().getMonthOfYear() + "-" + aggregatedSensorRecord.getPeriodEnd().getDayOfMonth()).
+                                    put("Value", formatFloat(aggregatedSensorRecord.getSensorValue(sensorId))).
+                                    put("AggregationScope", "" + scope.id()).build());
                         }
-                        return false;
+
+                        final InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest.build());
+                        final Map<Long, List<BigQueryError>> errors = insertAllResponse.getInsertErrors();
+                        if (errors != null && errors.size() > 0) {
+                            for (final Long aLong : errors.keySet()) {
+                                for (final BigQueryError error : errors.get(aLong)) {
+                                    logger.error("INSERT ERROR : '" + error.toString() + "'");
+                                }
+                            }
+                            return false;
+                        }
                     }
+                }
+            }
+
+            final TableId heatingLevelTableId = bigQuery.getTable(dataSetName, HEATING_LEVEL_TABLE_NAME).getTableId();
+            for (final Iterable<HeatingLevelRecord> heatingLevelRecords : Iterables.partition(getAggregatedHeatingLevelValues(), 10000)) {
+                final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(heatingLevelTableId);
+
+                for (final HeatingLevelRecord heatingLevelRecord : heatingLevelRecords) {
+                    insertAllRequest.addRow(ImmutableMap.<String, String>builder().
+                            put("DateTime", heatingLevelRecord.getDateTime().toString()).
+                            put("HeatingLevel", formatFloat(heatingLevelRecord.getHeatingLevel())).
+                            put("IndoorMonitorValue", formatFloat(heatingLevelRecord.getIndoorMonitorValue())).
+                            put("OutdoorMonitorValue", formatFloat(heatingLevelRecord.getOutdoorMonitorValue())).
+                            put("HeatingMonitorValue", formatFloat(heatingLevelRecord.getHeatingMonitorValue())).
+                            put("PeriodType", heatingLevelRecord.getPerdiod().name()).build());
+                }
+
+                final InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest.build());
+                final Map<Long, List<BigQueryError>> errors = insertAllResponse.getInsertErrors();
+                if (errors != null && errors.size() > 0) {
+                    for (final Long aLong : errors.keySet()) {
+                        for (final BigQueryError error : errors.get(aLong)) {
+                            logger.error("INSERT ERROR : '" + error.toString() + "'");
+                        }
+                    }
+                    return false;
                 }
             }
         }
 
-        final TableId heatingLevelTableId = bigQuery.getTable(dataSetName, HEATING_LEVEL_TABLE_NAME).getTableId();
-        for (final Iterable<HeatingLevelRecord> heatingLevelRecords : Iterables.partition(getAggregatedHeatingLevelValues(), 10000)) {
-            final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(heatingLevelTableId);
 
-            for (final HeatingLevelRecord heatingLevelRecord : heatingLevelRecords) {
-                insertAllRequest.addRow(ImmutableMap.<String, String>builder().
-                        put("DateTime", heatingLevelRecord.getDateTime().toString()).
-                        put("HeatingLevel", formatFloat(heatingLevelRecord.getHeatingLevel())).
-                        put("IndoorMonitorValue", formatFloat(heatingLevelRecord.getIndoorMonitorValue())).
-                        put("OutdoorMonitorValue", formatFloat(heatingLevelRecord.getOutdoorMonitorValue())).
-                        put("HeatingMonitorValue", formatFloat(heatingLevelRecord.getHeatingMonitorValue())).
-                        put("PeriodType", heatingLevelRecord.getPerdiod().name()).build());
+
+        return true;
+    }
+
+    private boolean addFuelEvents(final Iterable<VehicleFuelEvent> rawRecords) {
+        final TableId rawDataTableId = bigQuery.getTable(dataSetName, FUEL_EVENT_TABLE_NAME).getTableId();
+
+        logger.info("Got table id '" + rawDataTableId + "'");
+
+        int addedVakues = Iterables.size(rawRecords);
+
+
+//        for (final Iterable<SensorRecord> page : Iterables.partition(Iterables.filter(records, incrementalFilter(records)), 10000)) {
+        for (final Iterable<VehicleFuelEvent> page : Iterables.partition(rawRecords, 10000)) {
+            final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(rawDataTableId);
+
+            for (final VehicleFuelEvent record : page) {
+                if (record.getValue() != 0) {
+                    insertAllRequest.addRow(ImmutableMap.<String, String>builder().
+                            put("uuid", record.getSensorUUID()).
+                            put("dateTime", record.getDateTaken().toString()).
+                            put("date", record.getDateTaken().getYear() + "-" + record.getDateTaken().getMonthOfYear() + "-" + record.getDateTaken().getDayOfMonth()).
+                            put("time", record.getDateTaken().getHourOfDay() + ":" + record.getDateTaken().getMinuteOfHour() + ":" + record.getDateTaken().getSecondOfMinute()).
+                            put("odometerValue", formatFloat(record.getOdometerValue())).
+                            put("fuelVolume", formatFloat(record.getFuelVolume())).
+                            put("fuelPrice", formatFloat(record.getFuelPrice())).
+                            put("distance", formatFloat(record.getDistance())).
+                            put("consumption", formatFloat(record.getConsumption())).build());
+                }
             }
 
             final InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest.build());
@@ -209,8 +291,48 @@ public class BigQueryConnector implements Connector {
                 return false;
             }
         }
+        logger.info("Added " + addedVakues + " fuel events to BigQuery");
+        return true;
+    }
+
+    private boolean addVehiclePositions(final Iterable<VehiclePosition> rawRecords) {
+        final TableId rawDataTableId = bigQuery.getTable(dataSetName, POSITION_TABLE_NAME).getTableId();
+
+        logger.info("Got table id '" + rawDataTableId + "'");
+
+        int addedVakues = Iterables.size(rawRecords);
 
 
+//        for (final Iterable<SensorRecord> page : Iterables.partition(Iterables.filter(records, incrementalFilter(records)), 10000)) {
+        for (final Iterable<VehiclePosition> page : Iterables.partition(rawRecords, 10000)) {
+            final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(rawDataTableId);
+
+            for (final VehiclePosition record : page) {
+                if (record.getValue() != 0) {
+                    insertAllRequest.addRow(ImmutableMap.<String, String>builder().
+                            put("uuid", record.getSensorUUID()).
+                            put("dateTime", record.getDateTaken().toString()).
+                            put("date", record.getDateTaken().getYear() + "-" + record.getDateTaken().getMonthOfYear() + "-" + record.getDateTaken().getDayOfMonth()).
+                            put("time", record.getDateTaken().getHourOfDay() + ":" + record.getDateTaken().getMinuteOfHour() + ":" + record.getDateTaken().getSecondOfMinute()).
+                            put("latitude", record.getLatitude() + "").
+                            put("longitude", record.getLongitude() + "").
+                            put("position", "POINT(" + record.getLongitude() + " " + record.getLatitude() + ")").
+                            put("imageURL", record.getFileName()).build());
+                }
+            }
+
+            final InsertAllResponse insertAllResponse = bigQuery.insertAll(insertAllRequest.build());
+            final Map<Long, List<BigQueryError>> errors = insertAllResponse.getInsertErrors();
+            if (errors != null && errors.size() > 0) {
+                for (final Long aLong : errors.keySet()) {
+                    for (final BigQueryError error : errors.get(aLong)) {
+                        logger.error("INSERT ERROR : '" + error.toString() + "'");
+                    }
+                }
+                return false;
+            }
+        }
+        logger.info("Added " + addedVakues + " positions to BigQuery");
         return true;
     }
 
@@ -449,12 +571,56 @@ public class BigQueryConnector implements Connector {
     }
 
     private static String formatFloat(final float value) {
-        DecimalFormat df = new DecimalFormat("#.#");
+        DecimalFormat df = new DecimalFormat("#.###");
         return df.format(new Float(value).doubleValue());
     }
 
     public Optional<LocalDateTime> getRawCheckpointValue(String sensorId) {
-        final String query = StringUtils.replace(getQueryForDataSet(GET_WITHOUT_DATASET_CHECKPOINT_QUERY), SENSOR_ID_QUERY_PARAMETER, sensorId);
+        final String query = StringUtils.replace(getQueryForDataSet(GET_WITHOUT_DATASET_RAW_CHECKPOINT_QUERY), SENSOR_ID_QUERY_PARAMETER, sensorId);
+        logger.debug("Running query '" + query + "'");
+        final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
+        logger.debug("Iterating on query result '" + query + "'");
+        try {
+            for (FieldValueList row : bigQuery.query(queryConfig).iterateAll()) {
+                logger.debug("Got ROW");
+                for (FieldValue val : row) {
+                    logger.debug("Got attribute '" + val.toString() + "'");
+                    if (!val.isNull()) {
+                        logger.info("Checkpoint value for sensor '" + sensorId + "' is '" + val.getStringValue() + "'");
+                        return Optional.of(new LocalDateTime(val.getStringValue()));
+                    }
+                }
+            }
+        } catch (InterruptedException e) {
+            throw new IllegalStateException("Failed to run query '" + query + "'", e);
+        }
+        return Optional.absent();
+    }
+
+    public Optional<LocalDateTime> getFuelEventCheckpointValue(String sensorId) {
+        final String query = StringUtils.replace(getQueryForDataSet(GET_WITHOUT_DATASET_FUEL_EVENT_CHECKPOINT_QUERY), SENSOR_ID_QUERY_PARAMETER, sensorId);
+        logger.debug("Running query '" + query + "'");
+        final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
+        logger.debug("Iterating on query result '" + query + "'");
+        try {
+            for (FieldValueList row : bigQuery.query(queryConfig).iterateAll()) {
+                logger.debug("Got ROW");
+                for (FieldValue val : row) {
+                    logger.debug("Got attribute '" + val.toString() + "'");
+                    if (!val.isNull()) {
+                        logger.info("Checkpoint value for sensor '" + sensorId + "' is '" + val.getStringValue() + "'");
+                        return Optional.of(new LocalDateTime(val.getStringValue()));
+                    }
+                }
+            }
+        } catch (InterruptedException e) {
+            throw new IllegalStateException("Failed to run query '" + query + "'", e);
+        }
+        return Optional.absent();
+    }
+
+    public Optional<LocalDateTime> getPositionCheckpointValue(String sensorId) {
+        final String query = StringUtils.replace(getQueryForDataSet(GET_WITHOUT_DATASET_POSITION_CHECKPOINT_QUERY), SENSOR_ID_QUERY_PARAMETER, sensorId);
         logger.debug("Running query '" + query + "'");
         final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
         logger.debug("Iterating on query result '" + query + "'");
@@ -477,7 +643,15 @@ public class BigQueryConnector implements Connector {
 
     @Override
     public Optional<LocalDateTime> getCheckPointValue(String sensorId) {
-        return getRawCheckpointValue(sensorId);
+        final Optional<LocalDateTime> rawDataCheckPoint = getRawCheckpointValue(sensorId);
+        if (rawDataCheckPoint.isPresent()) {
+            return rawDataCheckPoint;
+        }
+        final Optional<LocalDateTime> fuelEventCheckPoint = getFuelEventCheckpointValue(sensorId);
+        if (fuelEventCheckPoint.isPresent()) {
+            return fuelEventCheckPoint;
+        }
+        return getPositionCheckpointValue(sensorId);
     }
 
     @Override

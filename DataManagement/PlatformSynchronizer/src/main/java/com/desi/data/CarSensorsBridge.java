@@ -56,7 +56,7 @@ public class CarSensorsBridge {
                 System.exit(4);
             }*/
 
-            final ImageAnnotator imageAnnotator = new ImageAnnotator(Lists.newArrayList("desi-car-images", "desi-car-fuel"), new File(args[0]), ConfigurationUtils.getAnnotationsFile(), PlatformClientId.S3Bridge);
+            final ImageAnnotator imageAnnotator = new ImageAnnotator(Lists.newArrayList("desi-car-images", "desi-car-fuel", "desi-roadtripimages"), new File(args[0]), ConfigurationUtils.getAnnotationsFile(), PlatformClientId.S3Bridge);
 
             final Iterable<AnnotatedImage> annotatedImages = imageAnnotator.annotate(LocalDateTime.parse("2010-1-1T00:00:00"), true);
             logger.info("Now analyzing images");

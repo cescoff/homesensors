@@ -254,7 +254,11 @@ public class BigQueryConnector implements Connector {
     }
 
     private boolean addFuelEvents(final Iterable<VehicleFuelEvent> rawRecords) {
-        final TableId rawDataTableId = bigQuery.getTable(dataSetName, FUEL_EVENT_TABLE_NAME).getTableId();
+        final Table rawDataTable = bigQuery.getTable(dataSetName, FUEL_EVENT_TABLE_NAME);
+        if (rawDataTable == null) {
+            return true;
+        }
+        final TableId rawDataTableId = rawDataTable.getTableId();
 
         logger.info("Got table id '" + rawDataTableId + "'");
 
@@ -296,7 +300,11 @@ public class BigQueryConnector implements Connector {
     }
 
     private boolean addVehiclePositions(final Iterable<VehiclePosition> rawRecords) {
-        final TableId rawDataTableId = bigQuery.getTable(dataSetName, POSITION_TABLE_NAME).getTableId();
+        final Table rawDataTable = bigQuery.getTable(dataSetName, POSITION_TABLE_NAME);
+        if (rawDataTable == null) {
+            return true;
+        }
+        final TableId rawDataTableId = rawDataTable.getTableId();
 
         logger.info("Got table id '" + rawDataTableId + "'");
 

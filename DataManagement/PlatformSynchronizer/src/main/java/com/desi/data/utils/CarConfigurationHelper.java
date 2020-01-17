@@ -69,7 +69,7 @@ public class CarConfigurationHelper implements SensorNameProvider {
 
     private static final Triplet<Float, Float, Float> HOME_POSITION = Triplet.with(48.813521f, 2.383957f, 80.0f);
 
-    private static final float TRIP_DISTANCE_THRESHOLD = 100000;
+    private static final float TRIP_DISTANCE_THRESHOLD = 50000;
 
     private final List<IGasStation> gasStations;
 

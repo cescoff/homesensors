@@ -39,7 +39,7 @@ public class CarSensorsBridge {
         logConfig.setProperty("log4j.appender.Appender1.layout", "org.apache.log4j.PatternLayout");
         logConfig.setProperty("log4j.appender.Appender1.layout.ConversionPattern", "%-7p %d [%t] %c %x - %m%n");
         logConfig.setProperty("log4j.appender.Appender2", "org.apache.log4j.FileAppender");
-        logConfig.setProperty("log4j.appender.Appender2.File", "logs/synchronizer.log");
+        logConfig.setProperty("log4j.appender.Appender2.File", "logs/carsynchronizer.log");
         logConfig.setProperty("log4j.appender.Appender2.layout", "org.apache.log4j.PatternLayout");
         logConfig.setProperty("log4j.appender.Appender2.layout.ConversionPattern", "%-7p %d [%t] %c %x - %m%n");
 

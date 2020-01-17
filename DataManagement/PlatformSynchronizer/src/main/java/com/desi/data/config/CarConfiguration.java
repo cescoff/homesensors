@@ -2,7 +2,10 @@ package com.desi.data.config;
 
 import com.desi.data.CarSensorRecord;
 import com.desi.data.bean.AnnotatedImage;
+import com.desi.data.bean.IGasStation;
 import com.desi.data.bean.VehicleImageData;
+import com.desi.data.binding.FuelType;
+import com.desi.data.binding.GasStation;
 import com.google.common.base.Optional;
 
 public interface CarConfiguration {
@@ -38,5 +41,9 @@ public interface CarConfiguration {
     public boolean isVehicleInImage(final AnnotatedImage image);
 
     public boolean isVehicleInATrip(final CarSensorRecord carSensorRecord);
+
+    public Optional<IGasStation> findGasStation(AnnotatedImage image);
+
+    public FuelType getFuelType();
 
 }

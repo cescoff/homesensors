@@ -2,10 +2,8 @@ package com.desi.data.config;
 
 import com.desi.data.ImageAnnotator;
 import com.desi.data.SensorUnit;
-import com.desi.data.bean.AnnotatedImage;
-import com.desi.data.bean.GPSLatitudeSensorRecord;
-import com.desi.data.bean.GPSLongitudeSensorRecord;
-import com.desi.data.bean.VehicleImageData;
+import com.desi.data.bean.*;
+import com.desi.data.binding.FuelType;
 import com.desi.data.utils.CarConfigurationHelper;
 import com.desi.data.utils.JAXBUtils;
 import com.google.common.base.Function;
@@ -16,6 +14,8 @@ import org.apache.commons.io.LineIterator;
 import org.apache.commons.lang.StringUtils;
 import org.checkerframework.checker.nullness.qual.Nullable;
 import org.joda.time.LocalDateTime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import javax.xml.bind.JAXBException;
 import java.io.*;
@@ -38,6 +38,8 @@ public class FuelOCRParser {
     private static final Pattern PRICE_PATTERN_DEGRAGED = Pattern.compile("([0-9]*[\\s.,]+[0-9]+)\\s*[e€]+.*");
     private static final Pattern PRICE_PATTERN = Pattern.compile("([0-9]+\\.*,*[0-9]*)\\s*[e€]+");
     private static final Pattern DISPLAY_FLOAT_PATTERN = Pattern.compile("([0-9]+\\s*\\.*,*\\s*[0-9]+\\s*[0-9]*)");
+
+    private static final Logger logger = LoggerFactory.getLogger(FuelOCRParser.class);
 
     private final CarConfiguration configuration;
 
@@ -112,6 +114,23 @@ public class FuelOCRParser {
                     }
                 }
                 otherValues.addAll(getFloatValue(text));
+            }
+        }
+
+        final Optional<IGasStation> gasStation = configuration.findGasStation(image);
+        if (gasStation.isPresent()) {
+            logger.debug("Found gas station '" + gasStation.get().getAddress() + "' for fuel event made on '" + image.getDateTaken() + "'");
+            final Optional<Float> price = gasStation.get().getFuelPrice(configuration.getFuelType(), image.getDateTaken());
+            if (price.isPresent()) {
+                logger.debug("Gas station '" + gasStation.get().getAddress() + "' has value '" + price.get() + "' on type '" + configuration.getFuelType() + "' for fuel event made on '" + image.getDateTaken() + "'");
+                if (pricePerLitre == null || !pricePerLitre.trusted) {
+                    pricePerLitre = new Value(ValueType.PRICE_PER_LITRE, price.get(), true);
+                } else {
+                    if (!fuzzyEquals(pricePerLitre.value, price.get())) {
+                        logger.warn("Not equals values '" + pricePerLitre.value + "!=" + price.get());
+                    }
+                    pricePerLitre = new Value(ValueType.PRICE_PER_LITRE, price.get(), true);
+                }
             }
         }
 

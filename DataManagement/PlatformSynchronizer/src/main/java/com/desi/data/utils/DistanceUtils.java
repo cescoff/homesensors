@@ -1,6 +1,13 @@
 package com.desi.data.utils;
 
+import com.desi.data.bean.GPSLatitudeSensorRecord;
+import com.desi.data.bean.GPSLongitudeSensorRecord;
+import com.google.common.base.Optional;
+import org.apache.commons.lang.StringUtils;
+import org.javatuples.Pair;
 import org.javatuples.Triplet;
+import org.joda.time.LocalDateTime;
+
 
 public class DistanceUtils {
 
@@ -25,8 +32,23 @@ public class DistanceUtils {
         }
     }
 
+    public static Optional<Triplet<Float, Float, Float>> getPosition(final String latitude, final String latitudeRef, final String longitude, final String longitudeRef, final String altitude) {
+        if (StringUtils.isEmpty(latitude) || StringUtils.isEmpty(latitudeRef) || StringUtils.isEmpty(longitude) || StringUtils.isEmpty(longitudeRef)) {
+            return Optional.absent();
+        }
+        final Float latitudeValue = new GPSLatitudeSensorRecord("uuid", LocalDateTime.now(), latitudeRef, latitude).getValue();
+        final Float longitudeValue = new GPSLongitudeSensorRecord("uuid", LocalDateTime.now(), longitudeRef, longitude).getValue();
+        float altitudeValue = 0;
+        if (StringUtils.isNotEmpty(altitude) && StringUtils.containsIgnoreCase(altitude, " metres")) {
+            altitudeValue = Float.parseFloat(StringUtils.remove(altitude, " metres"));
+        }
+        return Optional.of(Triplet.with(latitudeValue, longitudeValue, altitudeValue));
+    }
+
     private static Double deg2Rad(Float degrees) {
         return new Double(degrees * (Math.PI / 180));
     }
+
+
 
 }

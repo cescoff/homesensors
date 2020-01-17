@@ -3,20 +3,34 @@ package com.desi.data.utils;
 import com.desi.data.CarSensorRecord;
 import com.desi.data.SensorNameProvider;
 import com.desi.data.bean.AnnotatedImage;
+import com.desi.data.bean.IGasStation;
 import com.desi.data.bean.OdometerRecord;
 import com.desi.data.bean.VehicleImageData;
+import com.desi.data.binding.FrenchGasStations;
+import com.desi.data.binding.FuelType;
+import com.desi.data.binding.GasStation;
 import com.desi.data.config.CarConfiguration;
+import com.desi.data.config.ConfigurationUtils;
 import com.google.common.base.Optional;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.ImmutableMap;
+import com.google.common.collect.*;
+import org.apache.commons.io.FileUtils;
 import org.apache.commons.lang.StringUtils;
 import org.javatuples.Triplet;
+import org.joda.time.LocalDateTime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
+import javax.xml.bind.JAXBException;
+import java.io.File;
+import java.io.IOException;
+import java.util.List;
 import java.util.Map;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
 public class CarConfigurationHelper implements SensorNameProvider {
+
+    private static Logger logger = LoggerFactory.getLogger(CarConfigurationHelper.class);
 
     private static final String GASOLINE_SP95_98_PRICE_UUID = "defa6525-51f4-4c43-b67d-1caf27f96b4f";
     private static final String GASOLINE_SP95_98_TRIP_PRICE_UUID = GASOLINE_SP95_98_PRICE_UUID;
@@ -57,7 +71,26 @@ public class CarConfigurationHelper implements SensorNameProvider {
 
     private static final float TRIP_DISTANCE_THRESHOLD = 100000;
 
-    private CarConfigurationHelper() {}
+    private final List<IGasStation> gasStations;
+
+    private CarConfigurationHelper() {
+        final File fuelStationsDir = new File(ConfigurationUtils.getStorageDir(), "gas-stations");
+        final List<IGasStation> stations = Lists.newArrayList();
+        if (fuelStationsDir.exists()) {
+            for (final File configFile : FileUtils.listFiles(fuelStationsDir, new String[]{"xml"}, true)) {
+                try {
+                    Iterables.addAll(stations, JAXBUtils.unmarshal(FrenchGasStations.class, configFile).getStations());
+                } catch (JAXBException e) {
+                    logger.error("Cannot load stations file '" + configFile.getAbsolutePath() + "'", e);
+                } catch (IOException e) {
+                    logger.error("Cannot load stations file '" + configFile.getAbsolutePath() + "'", e);
+                }
+            }
+        } else {
+            logger.info("No fuel station configuration files are available while configuration directory '" + fuelStationsDir.getAbsolutePath() + "' does not exist");
+        }
+        this.gasStations = stations;
+    }
 
     public static CarConfigurationHelper getInstance() {
         return INSTANCE;
@@ -161,6 +194,16 @@ public class CarConfigurationHelper implements SensorNameProvider {
             @Override
             public boolean isVehicleInATrip(CarSensorRecord carSensorRecord) {
                 return isTrip(carSensorRecord);
+            }
+
+            @Override
+            public Optional<IGasStation> findGasStation(AnnotatedImage image) {
+                return genericFindGasStation(INSTANCE.gasStations, getFuelType(), image);
+            }
+
+            @Override
+            public FuelType getFuelType() {
+                return FuelType.SP98;
             }
 
             @Override
@@ -319,7 +362,10 @@ public class CarConfigurationHelper implements SensorNameProvider {
                 return Optional.absent();
             }
 
-
+            @Override
+            public Optional<IGasStation> findGasStation(AnnotatedImage image) {
+                return genericFindGasStation(INSTANCE.gasStations, getFuelType(), image);
+            }
 
             @Override
             public boolean isVehicleInImage(AnnotatedImage image) {
@@ -331,6 +377,12 @@ public class CarConfigurationHelper implements SensorNameProvider {
                     }
                 }
                 return false;
+            }
+
+
+            @Override
+            public FuelType getFuelType() {
+                return FuelType.SP98;
             }
 
         };
@@ -364,4 +416,50 @@ public class CarConfigurationHelper implements SensorNameProvider {
         for (final String uuid : uuids) result.put(uuid, getDisplayName(uuid));
         return result.build();
     }
+
+    private static Optional<Float> findPrice(
+            final Iterable<IGasStation> gasStations,
+            final FuelType fuelType,
+            final LocalDateTime dateTaken,
+            final float latitude,
+            final float longitude,
+            final float altitude) {
+        for (final IGasStation fuelStation : gasStations) {
+            if (DistanceUtils.getDistance(Triplet.with(latitude, longitude, altitude), Triplet.with(fuelStation.getLatitude(), fuelStation.getLongitude(), 0f)) <= 300) {
+                final Optional<Float> candidate = fuelStation.getFuelPrice(fuelType, dateTaken);
+                if (candidate.isPresent()) {
+                    return candidate;
+                }
+            }
+        }
+        return Optional.absent();
+    }
+
+    private static Optional<IGasStation> findFuelStation(final Iterable<IGasStation> gasStations, final float latitude, final float longitude, final float altitude) {
+        for (final IGasStation fuelStation : gasStations) {
+            if (DistanceUtils.getDistance(Triplet.with(latitude, longitude, altitude), Triplet.with(fuelStation.getLatitude(), fuelStation.getLongitude(), 0f)) <= 300) {
+                return Optional.of(fuelStation);
+            }
+        }
+        return Optional.absent();
+    }
+
+     private static  Optional<IGasStation> genericFindGasStation(final Iterable<IGasStation> gasStations, final FuelType fuelType, final AnnotatedImage image) {
+        final Optional<Triplet<Float, Float, Float>> imagePosition = DistanceUtils.getPosition(image.getLatitude(), image.getLatitudeRef(), image.getLongitude(), image.getLongitudeRef(), image.getAltitude());
+        if (!imagePosition.isPresent()) {
+            logger.info("No position found on image '" + image.getFileName() + "'");
+            return Optional.absent();
+        }
+        for (final IGasStation candidate : gasStations) {
+            Optional<IGasStation> station = findFuelStation(ImmutableList.of(candidate), imagePosition.get().getValue0(), imagePosition.get().getValue1(), imagePosition.get().getValue2());
+            if (station.isPresent()) {
+                if (station.get().getFuelPrice(fuelType, image.getDateTaken()).isPresent()) {
+                    return station;
+                }
+            }
+        }
+        return Optional.absent();
+    }
+
+
 }

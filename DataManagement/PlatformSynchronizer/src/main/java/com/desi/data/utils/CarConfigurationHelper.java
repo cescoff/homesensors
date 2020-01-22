@@ -79,10 +79,10 @@ public class CarConfigurationHelper implements SensorNameProvider {
         if (fuelStationsDir.exists()) {
             for (final File configFile : FileUtils.listFiles(fuelStationsDir, new String[]{"xml"}, true)) {
                 try {
-                    Iterables.addAll(stations, JAXBUtils.unmarshal(FrenchGasStations.class, configFile).getStations());
-                } catch (JAXBException e) {
-                    logger.error("Cannot load stations file '" + configFile.getAbsolutePath() + "'", e);
-                } catch (IOException e) {
+                    final Iterable<IGasStation> yearStations = Iterables.transform(JAXBStreamUtils.unmarshal(GasStation.class, configFile, "pdv"), new GasStationCache());
+                    Iterables.addAll(stations, yearStations);
+                    logger.info("File '" + configFile.getAbsolutePath() + "' has been loaded with " + Iterables.size(yearStations) + " gas stations");
+                } catch (Exception e) {
                     logger.error("Cannot load stations file '" + configFile.getAbsolutePath() + "'", e);
                 }
             }
@@ -90,6 +90,7 @@ public class CarConfigurationHelper implements SensorNameProvider {
             logger.info("No fuel station configuration files are available while configuration directory '" + fuelStationsDir.getAbsolutePath() + "' does not exist");
         }
         this.gasStations = stations;
+
     }
 
     public static CarConfigurationHelper getInstance() {
@@ -213,7 +214,7 @@ public class CarConfigurationHelper implements SensorNameProvider {
 
             @Override
             public boolean isValidGasolineConsumption(float value) {
-                return value >= 6 && value <= 13;
+                return value >= 6 && value <= 15.8;
             }
 
             @Override
@@ -447,7 +448,7 @@ public class CarConfigurationHelper implements SensorNameProvider {
      private static  Optional<IGasStation> genericFindGasStation(final Iterable<IGasStation> gasStations, final FuelType fuelType, final AnnotatedImage image) {
         final Optional<Triplet<Float, Float, Float>> imagePosition = DistanceUtils.getPosition(image.getLatitude(), image.getLatitudeRef(), image.getLongitude(), image.getLongitudeRef(), image.getAltitude());
         if (!imagePosition.isPresent()) {
-            logger.info("No position found on image '" + image.getFileName() + "'");
+            logger.debug("No position found on image '" + image.getFileName() + "'");
             return Optional.absent();
         }
         for (final IGasStation candidate : gasStations) {

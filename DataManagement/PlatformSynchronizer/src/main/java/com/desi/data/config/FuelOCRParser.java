@@ -37,7 +37,7 @@ public class FuelOCRParser {
 
     private static final Pattern PRICE_PATTERN_DEGRAGED = Pattern.compile("([0-9]*[\\s.,]+[0-9]+)\\s*[e€]+.*");
     private static final Pattern PRICE_PATTERN = Pattern.compile("([0-9]+\\.*,*[0-9]*)\\s*[e€]+");
-    private static final Pattern DISPLAY_FLOAT_PATTERN = Pattern.compile("([0-9]+\\s*\\.*,*\\s*[0-9]+\\s*[0-9]*)");
+    private static final Pattern DISPLAY_FLOAT_PATTERN = Pattern.compile("([0-9]+\\s*\\.*,*\\s*[0-9]+\\s*[0-9]*)\\s*[a-zA-Z]*");
 
     private static final Logger logger = LoggerFactory.getLogger(FuelOCRParser.class);
 

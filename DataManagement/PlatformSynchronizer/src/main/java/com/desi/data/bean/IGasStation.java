@@ -15,4 +15,6 @@ public interface IGasStation {
 
     public String getAddress();
 
+    public int getYearPrice();
+
 }

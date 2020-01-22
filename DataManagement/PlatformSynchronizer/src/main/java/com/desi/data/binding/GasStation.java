@@ -117,6 +117,18 @@ public class GasStation implements IGasStation {
         return Optional.absent();
     }
 
+    @Override
+    public int getYearPrice() {
+        int minYear = LocalDateTime.now().getYear() + 1;
+        for (final Prix prix : this.prix) {
+            final LocalDateTime prixDateTime = prix.getDateTime();
+            if (prixDateTime != null && prixDateTime.getYear() < minYear) {
+                minYear = prixDateTime.getYear();
+            }
+        }
+        return minYear;
+    }
+
     @XmlAccessorType(XmlAccessType.FIELD)
     public static class Prix {
 

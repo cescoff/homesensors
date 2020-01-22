@@ -221,7 +221,7 @@ public class CarSensorsBridge {
                                 return SensorUnit.POSITION;
                             }
                         };
-                        logger.info("Adding trip image at date time " + imageData.getDateTaken());
+                        logger.debug("Adding trip image at date time " + imageData.getDateTaken());
                         sensorsWithTripImages.add(new VehiclePosition(
                                 imageData,
                                 trip.getValue0().getSensorUUID(),

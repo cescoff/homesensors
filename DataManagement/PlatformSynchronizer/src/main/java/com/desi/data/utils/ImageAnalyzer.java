@@ -100,30 +100,30 @@ public abstract class ImageAnalyzer {
             }));
 
             final Map<VehicleImageData, List<VehicleImageData>> fuelEvents = Maps.newHashMap();
-            VehicleImageData previousOdometerValue = null;
+            VehicleImageData currentOdometerValue = null;
             List<VehicleImageData> currentBuffer = Lists.newArrayList();
             for (final VehicleImageData fuelValue : fuelValues) {
                 final Iterable<VehicleImageData> odometers = Iterables.filter(odometerValues, ConcomittentDateFilter(fuelValue));
                 if (!Iterables.isEmpty(odometers)) {
                     if (currentBuffer.size() > 0) {
 //
-                        if (previousOdometerValue != null) {
-                            fuelEvents.get(previousOdometerValue).addAll(currentBuffer);
+                        if (currentOdometerValue != null) {
+                            fuelEvents.get(currentOdometerValue).addAll(currentBuffer);
                             currentBuffer = Lists.newArrayList();
-                            previousOdometerValue = null;
+                            currentOdometerValue = null;
                         } else {
                             logger.error("No suitable odometer value found for event " + fuelValue.getDateTaken() + ", fileName='" + fuelValue.getImageData().getFileName() + "'");
                         }
                     }
 
-                    previousOdometerValue = Iterables.getFirst(odometers, null);
-                    fuelEvents.put(previousOdometerValue, Lists.newArrayList(fuelValue));
+                    currentOdometerValue = Iterables.getFirst(odometers, null);
+                    fuelEvents.put(currentOdometerValue, Lists.newArrayList(fuelValue));
                 } else {
                     currentBuffer.add(fuelValue);
                 }
             }
-            if (previousOdometerValue != null && currentBuffer.size() > 0) {
-                fuelEvents.put(previousOdometerValue, currentBuffer);
+            if (currentOdometerValue != null && currentBuffer.size() > 0) {
+                fuelEvents.put(currentOdometerValue, currentBuffer);
             }
 
             for (int index = 0; index < odometerValues.size(); index++) {
@@ -135,64 +135,75 @@ public abstract class ImageAnalyzer {
                         odometerValue.getOdometerValue());
                 result.add(odometerRecord);
                 if (fuelEvents.containsKey(odometerValue) && index < (odometerValues.size() - 1)) {
-                    final VehicleImageData previousValue = odometerValues.get(index + 1);;
-                    final float distance = odometerValue.getOdometerValue() - previousValue.getOdometerValue();
-
-                    if (distance > 0) {
-                        float fullVolume = 0;
-                        float priceSum = 0;
-                        float volumeSum = 0;
-
-                        for (final VehicleImageData fuelEvent : fuelEvents.get(odometerValue)) {
-                            if (fuelEvent.hasPricePerLitre()) {
-                                result.add(new PriceRecord(
-                                        fuelEvent,
-                                        carConfiguration.getGasolineUUID(odometerRecord, odometerRecord),
-                                        odometerValue.getDateTaken(),
-                                        fuelEvent.getPricePerLitre(),
-                                        SensorUnit.EURO));
-                            }
-
-                            fullVolume += fuelEvent.getVolume();
-                            if (fuelEvent.getPricePerLitre() > 0) {
-                                priceSum += fuelEvent.getVolume() * fuelEvent.getPricePerLitre();
-                                volumeSum += fuelEvent.getVolume();
-                            }
+                    VehicleImageData previousValue = null;
+                    for (int odometerIndex = index + 1; odometerIndex < odometerValues.size(); odometerIndex++) {
+                        if (fuelEvents.containsKey(odometerValues.get(odometerIndex)) && previousValue == null) {
+                            previousValue = odometerValues.get(odometerIndex);
                         }
-                        final float consumption = (100 * fullVolume) / distance;
-                        final float priceAvg;
-                        if (volumeSum > 0) priceAvg = priceSum / volumeSum;
-                        else priceAvg = 0;
+                    };
 
-                        result.add(new DistanceRecord(
-                                odometerValue,
-                                carConfiguration.getDistanceUUID(previousValue, odometerRecord),
-                                odometerValue.getDateTaken(),
-                                distance));
-                        result.add(new VehiclePosition(
-                                odometerValue.getImageData(),
-                                carConfiguration.getGPSUUID(),
-                                odometerValue.getFileName(),
-                                odometerValue.getDateTaken(),
-                                odometerValue.getLatitude(),
-                                odometerValue.getLongitude(),
-                                odometerValue.getAltitude(),
-                                0));
+                    if (previousValue == null) {
+                        logger.info("No previous odometer value found for event at date '" + odometerValue.getDateTaken() + "'");
+                    } else {
+                        final float distance = odometerValue.getOdometerValue() - previousValue.getOdometerValue();
 
-                        if (carConfiguration.isValidGasolineConsumption(consumption)) {
-                            result.add(new VehicleFuelEvent(
-                                    previousValue,
+                        if (distance > 0) {
+                            float fullVolume = 0;
+                            float priceSum = 0;
+                            float volumeSum = 0;
+
+                            for (final VehicleImageData fuelEvent : fuelEvents.get(odometerValue)) {
+                                if (fuelEvent.hasPricePerLitre()) {
+                                    result.add(new PriceRecord(
+                                            fuelEvent,
+                                            carConfiguration.getGasolineUUID(odometerRecord, odometerRecord),
+                                            odometerValue.getDateTaken(),
+                                            fuelEvent.getPricePerLitre(),
+                                            SensorUnit.EURO));
+                                }
+
+                                fullVolume += fuelEvent.getVolume();
+                                if (fuelEvent.getPricePerLitre() > 0) {
+                                    priceSum += fuelEvent.getVolume() * fuelEvent.getPricePerLitre();
+                                    volumeSum += fuelEvent.getVolume();
+                                }
+                            }
+                            final float consumption = (100 * fullVolume) / distance;
+                            final float priceAvg;
+                            if (volumeSum > 0) priceAvg = priceSum / volumeSum;
+                            else priceAvg = 0;
+
+                            result.add(new DistanceRecord(
                                     odometerValue,
-                                    carConfiguration.getUUID(),
+                                    carConfiguration.getDistanceUUID(previousValue, odometerRecord),
                                     odometerValue.getDateTaken(),
-                                    odometerValue.getOdometerValue(),
-                                    fullVolume,
-                                    priceAvg,
-                                    distance,
-                                    consumption));
+                                    distance));
+                            result.add(new VehiclePosition(
+                                    odometerValue.getImageData(),
+                                    carConfiguration.getGPSUUID(),
+                                    odometerValue.getFileName(),
+                                    odometerValue.getDateTaken(),
+                                    odometerValue.getLatitude(),
+                                    odometerValue.getLongitude(),
+                                    odometerValue.getAltitude(),
+                                    0));
+
+                            if (carConfiguration.isValidGasolineConsumption(consumption)) {
+                                result.add(new VehicleFuelEvent(
+                                        previousValue,
+                                        odometerValue,
+                                        carConfiguration.getUUID(),
+                                        odometerValue.getDateTaken(),
+                                        odometerValue.getOdometerValue(),
+                                        fullVolume,
+                                        priceAvg,
+                                        distance,
+                                        consumption));
+                            } else {
+                                logger.info("Invalid consumption " + consumption + " for fuel event '" + odometerValue.getDateTaken() + "' with file name '" + odometerValue.getFileName() + "' (distance=" + distance + ", volume=" + fullVolume + ", price=" + priceAvg + ")");
+                            }
                         }
                     }
-
                 }
             }
 

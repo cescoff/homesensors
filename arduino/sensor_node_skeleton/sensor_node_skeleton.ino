@@ -8,7 +8,7 @@ void setup() {
   Serial.begin(9600);
 
   // send an intro:
-  Serial.println("Sensor Node Skeleton");
+  Serial.println(F("Sensor Node Skeleton"));
   Serial.println();
 }
 
@@ -30,14 +30,14 @@ void loop() {
       float value = decodeValue(binaryMessage);
 
       Serial.print(messages[i]);
-      Serial.print("[");
+      Serial.print(F("["));
       Serial.print(binaryMessage);
-      Serial.print("] : ");
-      Serial.print("SensorId=");
+      Serial.print(F("] : "));
+      Serial.print(F("SensorId="));
       Serial.print(sensorId);
-      Serial.print(", MessageId=");
+      Serial.print(F(", MessageId="));
       Serial.print(messageId);
-      Serial.print(", Value=");
+      Serial.print(F(", Value="));
       Serial.println(value);
     }
 
@@ -69,15 +69,15 @@ unsigned long encodeMessage(int sensorId, int messageId, float value) {
   res += encodeInt((int) (abs(value) * 10), 10);
 
   if (DEBUG) {
-    Serial.print("[DEBUG] SensorId=");
+    Serial.print(F("[DEBUG] SensorId="));
     Serial.print(sensorId);
-    Serial.print(", MessageId=");
+    Serial.print(F(", MessageId="));
     Serial.print(messageId);
-    Serial.print(", Value=");
+    Serial.print(F(", Value="));
     Serial.print(value);
-    Serial.print("->'");
+    Serial.print(F("->'"));
     Serial.print(res);
-    Serial.println("'");
+    Serial.println(F("'"));
   }
 
   return messageToLong(res);
@@ -97,9 +97,9 @@ unsigned long messageToLong(String binary) {
     }
   }
   if (DEBUG) {
-    Serial.print("[DEBUG] messageToLong(");
+    Serial.print(F("[DEBUG] messageToLong("));
     Serial.print(binary);
-    Serial.print(")=");
+    Serial.print(F(")="));
     Serial.println(res);
   }
   return res;
@@ -107,9 +107,9 @@ unsigned long messageToLong(String binary) {
 
 String longToMessage(unsigned long value) {
   if (value > 16777215) {
-    Serial.print("[ERROR] Value '");
+    Serial.print(F("[ERROR] Value '"));
     Serial.print(value);
-    Serial.println("' is too large");
+    Serial.println(F("' is too large"));
     return "111111111111111111111111";
   }
   String res = "000000000000000000000000";
@@ -122,9 +122,9 @@ String longToMessage(unsigned long value) {
     }
   }
   if (DEBUG) {
-    Serial.print("[DEBUG] longToMessage(");
+    Serial.print(F("[DEBUG] longToMessage("));
     Serial.print(value);
-    Serial.print(")=");
+    Serial.print(F(")="));
     Serial.println(res);
   }
 
@@ -161,7 +161,7 @@ float decodeValue(String message) {
 String encodeInt(int value, int byteLength) {
   String res = "";
   if (value < 0) {
-    Serial.print("[ERROR] Unsigned int only, value is ");
+    Serial.print(F("[ERROR] Unsigned int only, value is "));
     Serial.println(value);
     for (int index = 0; index < byteLength; index++) {
       res+="1";
@@ -169,53 +169,53 @@ String encodeInt(int value, int byteLength) {
     return res;
   }
   if (byteLength == 4 && value > 15) {
-    Serial.print("[ERROR] Value ");
+    Serial.print(F("[ERROR] Value "));
     Serial.print(value);
-    Serial.print(" is too large for ");
+    Serial.print(F(" is too large for "));
     Serial.print(byteLength);
-    Serial.println(" representation");
+    Serial.println(F(" representation"));
     return "1111";
   } else if (byteLength == 5 && value > 31) {
-    Serial.print("[ERROR] Value ");
+    Serial.print(F("[ERROR] Value "));
     Serial.print(value);
-    Serial.print(" is too large for ");
+    Serial.print(F(" is too large for "));
     Serial.print(byteLength);
-    Serial.println(" representation");
+    Serial.println(F(" representation"));
     return "11111";
   } else if (byteLength == 6 && value > 63) {
-    Serial.print("[ERROR] Value ");
+    Serial.print(F("[ERROR] Value "));
     Serial.print(value);
-    Serial.print(" is too large for ");
+    Serial.print(F(" is too large for "));
     Serial.print(byteLength);
-    Serial.println(" representation");
+    Serial.println(F(" representation"));
     return "111111";
   } else if (byteLength == 7 && value > 127) {
-    Serial.print("[ERROR] Value ");
+    Serial.print(F("[ERROR] Value "));
     Serial.print(value);
-    Serial.print(" is too large for ");
+    Serial.print(F(" is too large for "));
     Serial.print(byteLength);
-    Serial.println(" representation");
+    Serial.println(F(" representation"));
     return "1111111";
   } else if (byteLength == 8 && value > 255) {
-    Serial.print("[ERROR] Value ");
+    Serial.print(F("[ERROR] Value "));
     Serial.print(value);
-    Serial.print(" is too large for ");
+    Serial.print(F(" is too large for "));
     Serial.print(byteLength);
-    Serial.println(" representation");
+    Serial.println(F(" representation"));
     return "11111111";
   } else if (byteLength == 9 && value > 511) {
-    Serial.print("[ERROR] Value ");
+    Serial.print(F("[ERROR] Value "));
     Serial.print(value);
-    Serial.print(" is too large for ");
+    Serial.print(F(" is too large for "));
     Serial.print(byteLength);
-    Serial.println(" representation");
+    Serial.println(F(" representation"));
     return "111111111";
   } else if (byteLength == 10 && value > 1023) {
-    Serial.print("[ERROR] Value ");
+    Serial.print(F("[ERROR] Value "));
     Serial.print(value);
-    Serial.print(" is too large for ");
+    Serial.print(F(" is too large for "));
     Serial.print(byteLength);
-    Serial.println(" representation");
+    Serial.println(F(" representation"));
     return "1111111111";
   }
 
@@ -275,11 +275,11 @@ String encodeInt(int value, int byteLength) {
   }
 
   if (DEBUG) {
-    Serial.print("[DEBUG] Encoded value of ");
+    Serial.print(F("[DEBUG] Encoded value of "));
     Serial.print(value);
-    Serial.print(" with byte number ");
+    Serial.print(F(" with byte number "));
     Serial.print(byteLength);
-    Serial.print(" is ");
+    Serial.print(F(" is "));
     Serial.println(res);
   }
   return res;
@@ -313,9 +313,9 @@ int decodeInt(String binary) {
     }
   }
   if (DEBUG) {
-    Serial.print("[DEBUG] decodeInt(");
+    Serial.print(F("[DEBUG] decodeInt("));
     Serial.print(binary);
-    Serial.print(")=");
+    Serial.print(F(")="));
     Serial.println(res);
   }
   return res;

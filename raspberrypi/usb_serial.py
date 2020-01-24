@@ -2,7 +2,11 @@ import serial
 import re
 from datetime import datetime
 
-pattern = re.compile("MSG://([a-z0-9\-]+);(C=[\+\-]*[0-9]+\.[0-9]+)");
+pattern = re.compile("MSG://([a-z0-9\-]+);(C=[\+\-]*[0-9]+\.[0-9]+)")
+
+fl=open("/home/pi/usb_serial.log", "a")
+fl.write(datetime.now().strftime("%d/%m/%Y %H:%M:%S") + " : usb_serial.py START\n")
+fl.close()
 
 ser = serial.Serial('/dev/ttyUSB0', 9600)
 while 1: 
@@ -17,4 +21,6 @@ while 1:
             f.write(rewrittenMessage + "\n")
             f.close()
         else:
-            print("No match for line='" + line.decode('utf-8') + "'")
+            fl=open("/home/pi/usb_serial.log", "a")
+            fl.write(datetime.now().strftime("%d/%m/%Y %H:%M:%S") + " : No match for line '" + line.decode('utf-8') + "'\n")
+            fl.close()

@@ -606,6 +606,13 @@ public class BigQueryConnector implements Connector {
     }
 
     public Optional<LocalDateTime> getFuelEventCheckpointValue(String sensorId) {
+        final Table rawDataTable = bigQuery.getTable(dataSetName, FUEL_EVENT_TABLE_NAME);
+
+        if (rawDataTable == null) {
+            logger.info("No table named '" + FUEL_EVENT_TABLE_NAME + "' in dataset '" + dataSetName + "'");
+            return Optional.absent();
+        }
+
         final String query = StringUtils.replace(getQueryForDataSet(GET_WITHOUT_DATASET_FUEL_EVENT_CHECKPOINT_QUERY), SENSOR_ID_QUERY_PARAMETER, sensorId);
         logger.debug("Running query '" + query + "'");
         final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
@@ -628,6 +635,13 @@ public class BigQueryConnector implements Connector {
     }
 
     public Optional<LocalDateTime> getPositionCheckpointValue(String sensorId) {
+        final Table rawDataTable = bigQuery.getTable(dataSetName, POSITION_TABLE_NAME);
+
+        if (rawDataTable == null) {
+            logger.info("No table named '" + POSITION_TABLE_NAME + "' in dataset '" + dataSetName + "'");
+            return Optional.absent();
+        }
+
         final String query = StringUtils.replace(getQueryForDataSet(GET_WITHOUT_DATASET_POSITION_CHECKPOINT_QUERY), SENSOR_ID_QUERY_PARAMETER, sensorId);
         logger.debug("Running query '" + query + "'");
         final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();

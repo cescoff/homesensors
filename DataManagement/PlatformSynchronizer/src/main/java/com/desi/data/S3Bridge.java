@@ -134,19 +134,26 @@ public class S3Bridge {
 
         final Map<String, Iterable<SensorRecord>> recordsBySensorUUID = getSensorRecordsByUUID(records.build());
 
+
         if (StringUtils.isNotEmpty(this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL))) {
+            final Map<String, List<SensorRecord>> newRecordsBySensorUUID = Maps.newHashMap();
             for (final String sensorUUID : recordsBySensorUUID.keySet()) {
                 final SensorType sensorType = this.sensorNameProvider.getType(sensorUUID);
                 if (sensorType == SensorType.HEATING_TEMPERATURE || sensorType == SensorType.HEATER_TEMPERATURE) {
+                    final String heatBurnSensorUUID = this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL);
+                    if (!newRecordsBySensorUUID.containsKey(heatBurnSensorUUID)) {
+                        newRecordsBySensorUUID.put(heatBurnSensorUUID, Lists.newArrayList());
+                    }
                     TemperatureRecord previousValue = null;
                     logger.info("Handling heat burns records on sensor '" + this.sensorNameProvider.getDisplayName(sensorUUID) + "'");
                     for (final SensorRecord sensorRecord : Ordering.natural().onResultOf(SENSORRECORD_SORT).sortedCopy(recordsBySensorUUID.get(sensorUUID))) {
                         if (sensorRecord instanceof  TemperatureRecord) {
                             final TemperatureRecord temperatureRecord = (TemperatureRecord) sensorRecord;
                             if (previousValue != null) {
-                                final HeatBurnSensorRecord heatBurnSensorRecord = new HeatBurnSensorRecord(this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL), previousValue, temperatureRecord);
+                                final HeatBurnSensorRecord heatBurnSensorRecord = new HeatBurnSensorRecord(heatBurnSensorUUID, previousValue, temperatureRecord);
                                 if (heatBurnSensorRecord.getValue() > 0) {
                                     records.add(heatBurnSensorRecord);
+                                    newRecordsBySensorUUID.get(heatBurnSensorUUID).add(heatBurnSensorRecord);
                                 }
                             }
                             previousValue = temperatureRecord;
@@ -154,6 +161,15 @@ public class S3Bridge {
                     }
                 }
 
+            }
+            for (final String newSensorUUID : newRecordsBySensorUUID.keySet()) {
+                if (!recordsBySensorUUID.containsKey(newSensorUUID)) {
+                    recordsBySensorUUID.put(newSensorUUID, newRecordsBySensorUUID.get(newSensorUUID));
+                } else {
+                    final List<SensorRecord> addedValues = newRecordsBySensorUUID.get(newSensorUUID);
+                    Iterables.addAll(addedValues, recordsBySensorUUID.get(newSensorUUID));
+                    recordsBySensorUUID.put(newSensorUUID, addedValues);
+                }
             }
         }
 
@@ -271,7 +287,7 @@ public class S3Bridge {
             final String line = lineIterator.nextLine();
             final String[] elements = StringUtils.split(line, ";");
             if (elements.length >= 4) {
-                final String sensorUUID = elements[0];
+                final String sensorUUID = StringUtils.trim(elements[0]);
                 final String dateTimeString = elements[1] + " " + elements[2];
                 final float value = new Double(StringUtils.remove(elements[3], "C=")).floatValue();
 

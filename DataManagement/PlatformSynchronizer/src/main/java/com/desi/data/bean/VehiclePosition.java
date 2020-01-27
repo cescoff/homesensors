@@ -2,6 +2,7 @@ package com.desi.data.bean;
 
 import com.desi.data.CarSensorRecord;
 import com.desi.data.SensorRecord;
+import com.desi.data.SensorType;
 import com.desi.data.SensorUnit;
 import org.joda.time.LocalDateTime;
 
@@ -82,6 +83,11 @@ public class VehiclePosition implements CarSensorRecord, Exportable  {
 
     public String getFileName() {
         return fileName;
+    }
+
+    @Override
+    public SensorType getType() {
+        return SensorType.POSITION;
     }
 
     @Override

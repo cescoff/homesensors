@@ -2,6 +2,7 @@ package com.desi.data.bean;
 
 import com.desi.data.CarSensorRecord;
 import com.desi.data.SensorRecord;
+import com.desi.data.SensorType;
 import com.desi.data.SensorUnit;
 import com.google.common.collect.Iterables;
 import com.google.common.collect.Lists;
@@ -159,4 +160,8 @@ public class OdometerRecord implements CarSensorRecord {
 
     }
 
+    @Override
+    public SensorType getType() {
+        return SensorType.DISTANCE_ODOMETER;
+    }
 }

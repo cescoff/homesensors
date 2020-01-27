@@ -27,7 +27,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 
-public class BigQueryConnector implements Connector {
+public class BigQueryConnector implements Connector, SensorNameProvider {
 
     private static final Logger logger = LoggerFactory.getLogger(BigQueryConnector.class);
 
@@ -38,6 +38,8 @@ public class BigQueryConnector implements Connector {
     private static final String DATASET_NAME_PARAMETER = "${DATASET}";
 
     private static final String SENSOR_RECORDS_TABLE_NAME = "SensorData";
+
+    private static final String SENSOR_NAMES_TABLE_NAME = "SensorNames";
 
     private static final String FUEL_EVENT_TABLE_NAME = "VehicleFuelEvent";
 
@@ -56,6 +58,8 @@ public class BigQueryConnector implements Connector {
     private static final String VALUE_QUERY_PARAMETER = "${VALUE}";
 
     private static final String CHECKPOINT_ATTRIBUTE_NAME = "checkpoint";
+
+    private static final String GET_SENSOR_NAMES_QUERY = "SELECT SensorId, SensorName, Unit, Type FROM " + DATASET_NAME_PARAMETER + "." + SENSOR_NAMES_TABLE_NAME;
 
     private static final String GET_WITHOUT_DATASET_RAW_CHECKPOINT_QUERY = "SELECT MAX(records.DateTime) " + CHECKPOINT_ATTRIBUTE_NAME + " FROM " + DATASET_NAME_PARAMETER + ".SensorData records WHERE records.SensorId=\"" + SENSOR_ID_QUERY_PARAMETER + "\"";
 
@@ -79,6 +83,12 @@ public class BigQueryConnector implements Connector {
     private BigQuery bigQuery;
 
     private final String dataSetName;
+
+    private final Map<String, String> sensorUUID2Name = Maps.newHashMap();
+
+    private final Map<String, SensorType> sensorUUID2Type = Maps.newHashMap();
+
+    private final Map<String, SensorUnit> sensorUUID2Unit = Maps.newHashMap();
 
     public BigQueryConnector(String dataSetName) {
         this.dataSetName = dataSetName;
@@ -116,6 +126,33 @@ public class BigQueryConnector implements Connector {
                 BigQueryOptions.newBuilder().setCredentials(googleCredentials).build().getService();
 
 
+        final Table sensorNamesTable = bigQuery.getTable(dataSetName, AGGREGATED_SENSOR_RECORDS_TABLE_NAME);
+
+        if (sensorNamesTable != null) {
+            final String query = getQueryForDataSet(GET_SENSOR_NAMES_QUERY);
+            logger.info("Running query '" + query + "'");
+            final QueryJobConfiguration queryConfig = QueryJobConfiguration.newBuilder(query).build();
+            logger.debug("Iterating on query result '" + query + "'");
+            try {
+                for (FieldValueList row : bigQuery.query(queryConfig).iterateAll()) {
+                    logger.debug("Got ROW");
+                    if (!row.get(0).isNull() && !row.get(1).isNull()) {
+                        // SensorId, SensorName, Unit, Type
+                        final String sensorUUID = row.get(0).getStringValue();
+                        this.sensorUUID2Name.put(sensorUUID, row.get(1).getStringValue());
+                        if (!row.get(2).isNull() && SensorUnit.resolveFromText(row.get(2).getStringValue()).isPresent()) {
+                            this.sensorUUID2Unit.put(sensorUUID, SensorUnit.resolveFromText(row.get(2).getStringValue()).get());
+                        }
+                        if (!row.get(3).isNull() && SensorType.resolve(Integer.parseInt(row.get(3).getStringValue())).isPresent()) {
+                            this.sensorUUID2Type.put(sensorUUID, SensorType.resolve(Integer.parseInt(row.get(3).getStringValue())).get());
+                        }
+                    }
+                }
+            } catch (InterruptedException e) {
+                throw new IllegalStateException("Failed to run query '" + query + "'", e);
+            }
+        }
+
         return true;
     }
 
@@ -130,6 +167,35 @@ public class BigQueryConnector implements Connector {
             return true;
         }
     };
+
+    @Override
+    public String getBurnerUUID(String ownerEmail) {
+        // TODO implement this
+        return null;
+    }
+
+    @Override
+    public String getDisplayName(String uuid) {
+        if (!this.sensorUUID2Name.containsKey(uuid)) {
+            return uuid;
+        }
+        return this.sensorUUID2Name.get(uuid);
+    }
+
+    @Override
+    public Map<String, String> getDisplayNames(Iterable<String> uuids) {
+        return ImmutableMap.copyOf(this.sensorUUID2Name);
+    }
+
+    @Override
+    public SensorType getType(String uuid) {
+        return this.sensorUUID2Type.get(uuid);
+    }
+
+    @Override
+    public SensorUnit getUnit(String uuid) {
+        return this.sensorUUID2Unit.get(uuid);
+    }
 
     @Override
     public boolean addRecords(Iterable<SensorRecord> records, SensorNameProvider nameProvider) throws Exception {
@@ -423,19 +489,19 @@ public class BigQueryConnector implements Connector {
     }
 
     private boolean addTo(final List<HeatingLevelRecord> result, final LocalDateTime dateTime, final SensorType type, final float value) {
-        if (type != SensorType.HEATING && type != SensorType.INDOOR && type != SensorType.OUTDOOR) {
+        if (type != SensorType.HEATING_TEMPERATURE && type != SensorType.INDOOR_TEMPERATURE && type != SensorType.OUTDOOR_TEMPERATURE) {
             return false;
         }
         for (final HeatingLevelRecord heatingLevelRecord : result) {
-            if (type == SensorType.HEATING) {
+            if (type == SensorType.HEATING_TEMPERATURE) {
                 if (heatingLevelRecord.addHeating(dateTime, value)) {
                     return true;
                 }
-            } else if (type == SensorType.INDOOR) {
+            } else if (type == SensorType.INDOOR_TEMPERATURE) {
                 if (heatingLevelRecord.addIndoor(dateTime, value)) {
                     return true;
                 }
-            } else if (type == SensorType.OUTDOOR) {
+            } else if (type == SensorType.OUTDOOR_TEMPERATURE) {
                 if (heatingLevelRecord.addOutdoor(dateTime, value)) {
                     return true;
                 }
@@ -500,7 +566,7 @@ public class BigQueryConnector implements Connector {
             for (FieldValueList row : bigQuery.query(queryConfig).iterateAll()) {
                 logger.debug("Got ROW");
                 if (!row.get(0).isNull() && !row.get(1).isNull()) {
-                    result.add(new TemperatureRecord(new LocalDateTime(row.get(0).getStringValue()), new Float(row.get(1).getDoubleValue()), sensorId));
+                    result.add(new TemperatureRecord(new LocalDateTime(row.get(0).getStringValue()), new Float(row.get(1).getDoubleValue()), sensorId, getType(sensorId)));
                 }
             }
         } catch (InterruptedException e) {
@@ -679,5 +745,10 @@ public class BigQueryConnector implements Connector {
     @Override
     public boolean end() {
         return true;
+    }
+
+    @Override
+    public AggregationType getAggregationType(String uuid) {
+        return new StaticSensorNameProvider().getAggregationType(uuid);
     }
 }

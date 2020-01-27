@@ -1,7 +1,6 @@
 package com.desi.data.utils;
 
-import com.desi.data.CarSensorRecord;
-import com.desi.data.SensorNameProvider;
+import com.desi.data.*;
 import com.desi.data.bean.AnnotatedImage;
 import com.desi.data.bean.IGasStation;
 import com.desi.data.bean.OdometerRecord;
@@ -91,6 +90,56 @@ public class CarConfigurationHelper implements SensorNameProvider {
         }
         this.gasStations = stations;
 
+    }
+
+    @Override
+    public SensorType getType(String uuid) {
+        if (PEUGEOT_305_UUID.equals(uuid)) return SensorType.POSITION;
+        if (PEUGEOT_305_DISTANCE_UUID.equals(uuid)) return SensorType.DISTANCE;
+        if (PEUGEOT_305_TRIP_DISTANCE_UUID.equals(uuid)) return SensorType.DISTANCE;
+        if (PEUGEOT_305_ODOMETER_UUID.equals(uuid)) return SensorType.DISTANCE_ODOMETER;
+        if (PEUGEOT_305_TRIP_GASOLINE_METER_UUID.equals(uuid)) return SensorType.GASOLINE_VOLUME_ODOMETER;
+        if (PEUGEOT_305_GASOLINE_METER_UUID.equals(uuid)) return SensorType.GASOLINE_VOLUME_ODOMETER;
+        if (PEUGEOT_305_GASOLINE_AVG_METER_UUID.equals(uuid)) return SensorType.GASOLINE_VOLUME_ODOMETER;
+        if (PEUGEOT_305_TRIP_GASOLINE_AVG_METER_UUID.equals(uuid)) return SensorType.GASOLINE_VOLUME_ODOMETER;
+        if (PEUGEOT_305_GPS_UUID.equals(uuid)) return SensorType.POSITION;
+
+        if (VW_LT25_01_UUID.equals(uuid)) return SensorType.POSITION;
+        if (VW_LT25_01_DISTANCE_UUID.equals(uuid)) return SensorType.DISTANCE;
+        if (VW_LT25_01_TRIP_DISTANCE_UUID.equals(uuid)) return SensorType.DISTANCE;
+        if (VW_LT25_01_ODOMETER_UUID.equals(uuid)) return SensorType.DISTANCE_ODOMETER;
+        if (VW_LT25_01_GASOLINE_METER_UUID.equals(uuid)) return SensorType.GASOLINE_VOLUME_ODOMETER;
+        if (VW_LT25_01_TRIP_GASOLINE_METER_UUID.equals(uuid)) return SensorType.GASOLINE_VOLUME_ODOMETER;
+        if (VW_LT25_01_GASOLINE_AVG_METER_UUID.equals(uuid)) return SensorType.GASOLINE_VOLUME_ODOMETER;
+        if (VW_LT25_01_TRIP_GASOLINE_AVG_METER_UUID.equals(uuid)) return SensorType.GASOLINE_VOLUME_ODOMETER;
+        if (VW_LT25_01_GPS_UUID.equals(uuid)) return SensorType.POSITION;
+
+        return null;
+    }
+
+    @Override
+    public SensorUnit getUnit(String uuid) {
+        if (PEUGEOT_305_UUID.equals(uuid)) return SensorUnit.POSITION;
+        if (PEUGEOT_305_DISTANCE_UUID.equals(uuid)) return SensorUnit.KILOMETER;
+        if (PEUGEOT_305_TRIP_DISTANCE_UUID.equals(uuid)) return SensorUnit.KILOMETER;
+        if (PEUGEOT_305_ODOMETER_UUID.equals(uuid)) return SensorUnit.KILOMETER;
+        if (PEUGEOT_305_TRIP_GASOLINE_METER_UUID.equals(uuid)) return SensorUnit.GASOLINE_CONSUMPTION;
+        if (PEUGEOT_305_GASOLINE_METER_UUID.equals(uuid)) return SensorUnit.GASOLINE_CONSUMPTION;
+        if (PEUGEOT_305_GASOLINE_AVG_METER_UUID.equals(uuid)) return SensorUnit.GASOLINE_CONSUMPTION;
+        if (PEUGEOT_305_TRIP_GASOLINE_AVG_METER_UUID.equals(uuid)) return SensorUnit.GASOLINE_CONSUMPTION;
+        if (PEUGEOT_305_GPS_UUID.equals(uuid)) return SensorUnit.POSITION;
+
+        if (VW_LT25_01_UUID.equals(uuid)) return SensorUnit.POSITION;
+        if (VW_LT25_01_DISTANCE_UUID.equals(uuid)) return SensorUnit.KILOMETER;
+        if (VW_LT25_01_TRIP_DISTANCE_UUID.equals(uuid)) return SensorUnit.KILOMETER;
+        if (VW_LT25_01_ODOMETER_UUID.equals(uuid)) return SensorUnit.KILOMETER;
+        if (VW_LT25_01_GASOLINE_METER_UUID.equals(uuid)) return SensorUnit.GASOLINE_CONSUMPTION;
+        if (VW_LT25_01_TRIP_GASOLINE_METER_UUID.equals(uuid)) return SensorUnit.GASOLINE_CONSUMPTION;
+        if (VW_LT25_01_GASOLINE_AVG_METER_UUID.equals(uuid)) return SensorUnit.GASOLINE_CONSUMPTION;
+        if (VW_LT25_01_TRIP_GASOLINE_AVG_METER_UUID.equals(uuid)) return SensorUnit.GASOLINE_CONSUMPTION;
+        if (VW_LT25_01_GPS_UUID.equals(uuid)) return SensorUnit.POSITION;
+
+        return null;
     }
 
     public static CarConfigurationHelper getInstance() {
@@ -462,5 +511,14 @@ public class CarConfigurationHelper implements SensorNameProvider {
         return Optional.absent();
     }
 
+    @Override
+    public String getBurnerUUID(String ownerEmail) {
+        // TODO implement this once GPS is plugged
+        return null;
+    }
 
+    @Override
+    public AggregationType getAggregationType(String uuid) {
+        return AggregationType.SUM;
+    }
 }

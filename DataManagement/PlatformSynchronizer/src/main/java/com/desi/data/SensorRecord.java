@@ -12,4 +12,6 @@ public interface SensorRecord {
 
     public SensorUnit getUnit();
 
+    public SensorType getType();
+
 }

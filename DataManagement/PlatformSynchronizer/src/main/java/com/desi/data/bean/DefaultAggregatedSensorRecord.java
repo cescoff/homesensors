@@ -1,9 +1,6 @@
 package com.desi.data.bean;
 
-import com.desi.data.AggregatedSensorRecord;
-import com.desi.data.SensorNameProvider;
-import com.desi.data.SensorRecord;
-import com.desi.data.SensorUnit;
+import com.desi.data.*;
 import com.google.common.collect.*;
 import org.joda.time.LocalDateTime;
 
@@ -54,7 +51,13 @@ public class DefaultAggregatedSensorRecord implements AggregatedSensorRecord {
             for (final SensorRecord record : recordsByUUID.get(uuid)) {
                 sum+=record.getValue();
             }
-            return sum / Iterables.size(recordsByUUID.get(uuid));
+            if (sensorNameProvider.getAggregationType(uuid) == AggregationType.AVG) {
+                return sum / Iterables.size(recordsByUUID.get(uuid));
+            } else if (sensorNameProvider.getAggregationType(uuid) == AggregationType.SUM) {
+                return sum;
+            } else {
+                throw new IllegalStateException("Unsupported aggregation type '" + sensorNameProvider.getAggregationType(uuid) + "'");
+            }
         }
         return 0;
     }

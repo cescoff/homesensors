@@ -1,6 +1,7 @@
 package com.desi.data.bean;
 
 import com.desi.data.SensorRecord;
+import com.desi.data.SensorType;
 import com.desi.data.SensorUnit;
 import org.apache.commons.lang.StringUtils;
 import org.joda.time.LocalDateTime;
@@ -63,11 +64,15 @@ public class GPSLongitudeSensorRecord implements SensorRecord {
         return SensorUnit.POSITION;
     }
 
+    @Override
+    public SensorType getType() {
+        return SensorType.POSITION;
+    }
+
     public static void main(String[] args) {
         final GPSLatitudeSensorRecord lat = new GPSLatitudeSensorRecord("uuid", LocalDateTime.now(), "N", "48° 49' 32.68\"");
         final GPSLongitudeSensorRecord lon = new GPSLongitudeSensorRecord("uuid", LocalDateTime.now(), "E", "2° 20' 55.93\"");
         System.out.println("Lat/Lon=" + lat.getValue() + "/" + lon.getValue());
     }
-
 
 }

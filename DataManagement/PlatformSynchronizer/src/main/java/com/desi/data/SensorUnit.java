@@ -16,7 +16,8 @@ public enum SensorUnit {
     GASOLINE_VOLUME(Energy.FOSSIL, "L", "Litres"),
     WATT(Energy.ELECTRIC, "W", "Watt"),
     POSITION(Energy.DISTANCE, "Lat/Long", "Latitude/Longitude"),
-    DEGREES_CELSIUS(Energy.THERMAL, "°C", "Degrees Celsius");
+    DEGREES_CELSIUS(Energy.THERMAL, "°C", "Degrees Celsius"),
+    SECONDS(Energy.FOSSIL, "s", "Seconds");
 
     private final Energy energy;
 
@@ -50,4 +51,14 @@ public enum SensorUnit {
         }
         return Optional.absent();
     }
+
+    public static Optional<SensorUnit> resolveFromText(final String element) {
+        for (final SensorUnit unit : values()) {
+            if (unit.numberDisplay.equals(element) || unit.label.equals(element)) {
+                return Optional.of(unit);
+            }
+        }
+        return Optional.absent();
+    }
+
 }

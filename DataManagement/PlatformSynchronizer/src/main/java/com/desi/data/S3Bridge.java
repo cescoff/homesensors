@@ -8,6 +8,7 @@ import com.amazonaws.services.s3.model.GetObjectRequest;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
+import com.desi.data.bean.HeatBurnSensorRecord;
 import com.desi.data.bean.TemperatureRecord;
 import com.desi.data.bigquery.BigQueryConnector;
 import com.desi.data.config.PlatformCredentialsConfig;
@@ -16,12 +17,10 @@ import com.desi.data.spreadsheet.SpreadSheetConverter;
 import com.desi.data.utils.JAXBUtils;
 import com.desi.data.zoho.ZohoFileConnector;
 import com.google.auth.oauth2.GoogleCredentials;
+import com.google.common.base.Function;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
-import com.google.common.collect.ImmutableList;
-import com.google.common.collect.Iterables;
-import com.google.common.collect.Maps;
-import com.google.common.collect.Sets;
+import com.google.common.collect.*;
 import org.apache.commons.io.LineIterator;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.PropertyConfigurator;
@@ -47,6 +46,8 @@ public class S3Bridge {
 
     private static final String REGION = "eu-west-3";
 
+    private static final String DEFAULT_OWNER_EMAIL = "corentin.escoffier@gmail.com";
+
     private final Iterable<Connector> connectors;
 
     private final File awsCredentialsConfigurationFile;
@@ -63,11 +64,14 @@ public class S3Bridge {
 
     private AtomicBoolean INIT_DONE = new AtomicBoolean(false);
 
+    private SensorNameProvider sensorNameProvider = null;
+
     public S3Bridge(Iterable<Connector> connectors, File awsCredentialsConfigurationFile, PlatformClientId clientId, final String folder) {
         this.connectors = connectors;
         this.awsCredentialsConfigurationFile = awsCredentialsConfigurationFile;
         this.clientId = clientId;
         this.folder = folder;
+        this.sensorNameProvider = new StaticSensorNameProvider();
     }
 
 
@@ -128,6 +132,31 @@ public class S3Bridge {
 
         s3.shutdown();
 
+        final Map<String, Iterable<SensorRecord>> recordsBySensorUUID = getSensorRecordsByUUID(records.build());
+
+        if (StringUtils.isNotEmpty(this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL))) {
+            for (final String sensorUUID : recordsBySensorUUID.keySet()) {
+                final SensorType sensorType = this.sensorNameProvider.getType(sensorUUID);
+                if (sensorType == SensorType.HEATING_TEMPERATURE || sensorType == SensorType.HEATER_TEMPERATURE) {
+                    TemperatureRecord previousValue = null;
+                    logger.info("Handling heat burns records on sensor '" + this.sensorNameProvider.getDisplayName(sensorUUID) + "'");
+                    for (final SensorRecord sensorRecord : Ordering.natural().onResultOf(SENSORRECORD_SORT).sortedCopy(recordsBySensorUUID.get(sensorUUID))) {
+                        if (sensorRecord instanceof  TemperatureRecord) {
+                            final TemperatureRecord temperatureRecord = (TemperatureRecord) sensorRecord;
+                            if (previousValue != null) {
+                                final HeatBurnSensorRecord heatBurnSensorRecord = new HeatBurnSensorRecord(this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL), previousValue, temperatureRecord);
+                                if (heatBurnSensorRecord.getValue() > 0) {
+                                    records.add(heatBurnSensorRecord);
+                                }
+                            }
+                            previousValue = temperatureRecord;
+                        }
+                    }
+                }
+
+            }
+        }
+
         for (final Connector connector : connectors) {
             final PlatformCredentialsConfig.Credentials credentials;
             if (connector.getPlatformId().isPresent()) {
@@ -157,7 +186,7 @@ public class S3Bridge {
                 logger.info("Begin of connector '" + connector.getClass().getSimpleName() + "'");
                 final Map<String, LocalDateTime> checkpoints = Maps.newHashMap();
 
-                for (final String sensorUUID : getSensorUUIDs(records.build())) {
+                for (final String sensorUUID : recordsBySensorUUID.keySet()) {
                     final Optional<LocalDateTime> checkpointValue = connector.getCheckPointValue(sensorUUID);
                     if (checkpointValue.isPresent()) {
                         checkpoints.put(sensorUUID, checkpointValue.get());
@@ -197,6 +226,15 @@ public class S3Bridge {
         return true;
     }
 
+    private static final Function<SensorRecord, LocalDateTime> SENSORRECORD_SORT = new Function<SensorRecord, LocalDateTime>() {
+
+        @Nullable
+        @Override
+        public LocalDateTime apply(@Nullable SensorRecord sensorRecord) {
+            return sensorRecord.getDateTaken();
+        }
+    };
+
     private Iterable<String> getSensorUUIDs(final Iterable<SensorRecord> records) {
         final Set<String> alreadyAdded = Sets.newHashSet();
         final ImmutableList.Builder<String> result = ImmutableList.builder();
@@ -207,6 +245,18 @@ public class S3Bridge {
             }
         }
         return result.build();
+    }
+
+    private Map<String, Iterable<SensorRecord>> getSensorRecordsByUUID(final Iterable<SensorRecord> records) {
+        final Map<String, Iterable<SensorRecord>> index = Maps.newHashMap();
+
+        for (final SensorRecord sensorRecord : records) {
+            if (!index.containsKey(sensorRecord.getSensorUUID())) {
+                index.put(sensorRecord.getSensorUUID(), Lists.newArrayList());
+            }
+            ((List<SensorRecord>) index.get(sensorRecord.getSensorUUID())).add(sensorRecord);
+        }
+        return index;
     }
 
     private static Iterable<TemperatureRecord> parseContent(final InputStream content) throws Exception {
@@ -226,7 +276,7 @@ public class S3Bridge {
                 final float value = new Double(StringUtils.remove(elements[3], "C=")).floatValue();
 
                 if (value != 85.0) {
-                    result.add(new TemperatureRecord(parseDateTime(dateTimeString), value, sensorUUID));
+                    result.add(new TemperatureRecord(parseDateTime(dateTimeString), value, sensorUUID, new StaticSensorNameProvider().getType(sensorUUID)));
                 }
             } else {
                 throw new Exception("UNPARSABLE LINE '" + line + "'");

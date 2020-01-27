@@ -220,6 +220,11 @@ public class CarSensorsBridge {
                             public SensorUnit getUnit() {
                                 return SensorUnit.POSITION;
                             }
+
+                            @Override
+                            public SensorType getType() {
+                                return SensorType.POSITION;
+                            }
                         };
                         logger.debug("Adding trip image at date time " + imageData.getDateTaken());
                         sensorsWithTripImages.add(new VehiclePosition(

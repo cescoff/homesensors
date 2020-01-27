@@ -1,6 +1,7 @@
 package com.desi.data.config;
 
 import com.desi.data.ImageAnnotator;
+import com.desi.data.SensorType;
 import com.desi.data.SensorUnit;
 import com.desi.data.bean.*;
 import com.desi.data.binding.FuelType;
@@ -724,6 +725,11 @@ public class FuelOCRParser {
         }
 
         @Override
+        public SensorType getType() {
+            return SensorType.DISTANCE_ODOMETER;
+        }
+
+        @Override
         public boolean equals(Object o) {
             if (this == o) return true;
             if (!(o instanceof BasicVehicleImageData)) return false;
@@ -877,6 +883,11 @@ public class FuelOCRParser {
                     @Override
                     public SensorUnit getUnit() {
                         return SensorUnit.POSITION;
+                    }
+
+                    @Override
+                    public SensorType getType() {
+                        return SensorType.POSITION;
                     }
                 });
             }

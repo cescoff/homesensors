@@ -1,4 +1,5 @@
-#include <RCSwitch.h>
+#include <RF24.h> 
+#include <printf.h>
 #include <SPI.h> 
 #include <OneWire.h>
 #include <DallasTemperature.h>
@@ -7,12 +8,13 @@
 
 const bool DEBUG = false;
 
-RCSwitch mySwitch = RCSwitch();
+const byte address[6] = "00001";
+RF24 radio(7, 8); // CE, CSN
 
-#define ONE_WIRE_BUS1 5
-#define ONE_WIRE_BUS2 6
-#define ONE_WIRE_BUS3 7
-#define ONE_WIRE_BUS4 9
+#define ONE_WIRE_BUS1 4
+#define ONE_WIRE_BUS2 9
+#define ONE_WIRE_BUS3 5
+#define ONE_WIRE_BUS4 6
 
 OneWire oneWire1(ONE_WIRE_BUS1);
 OneWire oneWire2(ONE_WIRE_BUS2);
@@ -27,6 +29,9 @@ float heatingCelcius=0;
 float heatingReturnCelcius=0;
 float heaterCelcius=0;
 
+float previousHeatingCelcius=0;
+float previousHeaterCelcius=0;
+
 /*
 const char* BATHROOM_SENSOR_UUID = "eef014ca-4261-40a8-aecd-ec41e466e5d0";
 const char* HEATER_SENSOR_UUID = "c4944883-1151-4263-9e7b-965e285e212c";
@@ -39,9 +44,10 @@ const int HEATING_SENSOR_ID = 14;
 const int HEATING_RETURN_SENSOR_ID = 13;
 const int EXTERNAL_SENSOR_ID = 12;
 
+const int HEAT_BURN_SENSOR_ID=11;
+
 int messageId = 1;
 
-unsigned long lastPingMillis = 0;
 unsigned long lastSerialValueMillis = 0;
 
 String inputString = "";         // a String to hold incoming data
@@ -53,41 +59,142 @@ bool updated = false;
 void setup() {
   Serial.begin(115200);
 
-  mySwitch.enableTransmit(10);
     // Initialize ASK Object
   bathRoomSensor.begin();
   heaterSensor.begin();
   heatingSensor.begin();
   heatingReturnSensor.begin();
+
+  radio.begin();
+  radio.openWritingPipe(address);
+  radio.setPALevel(RF24_PA_MAX);
+  radio.stopListening();
+
+  printf_begin();
+  radio.printDetails();
+
+  delay(5000);
 }
 
 
 void loop() {
-  if (lastPingMillis == 0) {
-    lastPingMillis = millis();
-  }
-  if ((millis() - lastPingMillis) >= 30000) {
       unsigned long message = 0;
+
+      float heatBurn=1.0;
   
       bathRoomSensor.requestTemperatures(); 
       bathroomCelcius=bathRoomSensor.getTempCByIndex(0);    
-      message = encodeMessage(BATHROOM_SENSOR_ID, messageId, bathroomCelcius);
-      mySwitch.send(message, 32);
-  
+      if (bathroomCelcius > -20) {
+        message = encodeMessage(BATHROOM_SENSOR_ID, messageId, bathroomCelcius);
+        Serial.print("Bathroom temperature is ");
+        Serial.print(bathroomCelcius);
+        Serial.println("C");
+        if (radio.isChipConnected()) {
+          if(radio.write(&message, sizeof(unsigned long))) {
+            Serial.print("Message ");
+            Serial.print(message);
+            Serial.println(" sent");
+          } else {
+            Serial.println("Failed to sent message");
+          }
+        } else {
+          Serial.println("Message will not be sent by NF24, because hardware is NOT connected");
+        }
+        delay(1000);
+      } else {
+        Serial.println("Bathroom sensor is not connected");
+      }
+      
       heaterSensor.requestTemperatures(); 
-      heaterCelcius=heaterSensor.getTempCByIndex(0);    
-      message = encodeMessage(HEATER_SENSOR_ID, messageId, heaterCelcius);
-      mySwitch.send(message, 32);
-  
+      heaterCelcius=heaterSensor.getTempCByIndex(0);
+      if (heaterCelcius > -20) {
+        Serial.print("Heater temperature is ");
+        Serial.print(heaterCelcius);
+        Serial.println("C");
+        message = encodeMessage(HEATER_SENSOR_ID, messageId, heaterCelcius);
+        if (radio.isChipConnected()) {
+          if(radio.write(&message, sizeof(unsigned long))) {
+            Serial.print("Message ");
+            Serial.print(message);
+            Serial.println(" sent");
+          } else {
+            Serial.println("Failed to sent message");
+          }
+        } else {
+          Serial.println("Message will not be sent by NF24, because hardware is NOT connected");
+        }
+        delay(1000);
+      } else {
+        Serial.println("Heater sensor is not connected");
+      }
+
       heatingSensor.requestTemperatures(); 
       heatingCelcius=heatingSensor.getTempCByIndex(0);    
-      message = encodeMessage(HEATING_SENSOR_ID, messageId, heatingCelcius);
-      mySwitch.send(message, 32);
+      if (heatingCelcius > -20) {
+        Serial.print("Heating temperature is ");
+        Serial.print(heatingCelcius);
+        Serial.println("C");
+        message = encodeMessage(HEATING_SENSOR_ID, messageId, heatingCelcius);
+        if (radio.isChipConnected()) {
+          if(radio.write(&message, sizeof(unsigned long))) {
+            Serial.print("Message ");
+            Serial.print(message);
+            Serial.println(" sent");
+          } else {
+            Serial.println("Failed to sent message");
+          }
+        } else {
+          Serial.println("Message will not be sent by NF24, because hardware is NOT connected");
+        }
+        delay(1000);
+      } else {
+        Serial.println("Heating sensor is not connected");
+      }
   
       heatingReturnSensor.requestTemperatures();
       heatingReturnCelcius=heatingReturnSensor.getTempCByIndex(0);
-      message = encodeMessage(HEATING_RETURN_SENSOR_ID, messageId, heatingReturnCelcius);
-      mySwitch.send(message, 32);
+      if (heatingReturnCelcius > -20) {
+        Serial.print("HeatingReturn temperature is ");
+        Serial.print(heatingReturnCelcius);
+        Serial.println("C");
+        message = encodeMessage(HEATING_RETURN_SENSOR_ID, messageId, heatingReturnCelcius);
+        if (radio.isChipConnected()) {
+          if(radio.write(&message, sizeof(unsigned long))) {
+            Serial.print("Message ");
+            Serial.print(message);
+            Serial.println(" sent");
+          } else {
+            Serial.println("Failed to sent message");
+          }
+        } else {
+          Serial.println("Message will not be sent by NF24, because hardware is NOT connected");
+        }
+        delay(1000);
+        if (previousHeatingCelcius > heatingCelcius) {
+          heatBurn = 0.0;
+        }
+        if (previousHeaterCelcius > heaterCelcius) {
+          heatBurn = 0.0;
+        }
+  
+        message = encodeMessage(HEAT_BURN_SENSOR_ID, messageId, heatBurn);
+        if (radio.isChipConnected()) {
+          if(radio.write(&message, sizeof(unsigned long))) {
+            Serial.print("Message ");
+            Serial.print(message);
+            Serial.println(" sent");
+          } else {
+            Serial.println("Failed to sent message");
+          }
+        } else {
+          Serial.println("Message will not be sent by NF24, because hardware is NOT connected");
+        }
+        previousHeatingCelcius=heatingCelcius;
+        previousHeaterCelcius=heaterCelcius;
+        delay(1000);
+      } else {
+        Serial.println("HeatingReturn sensor is not connected");
+      }
 
       messageId=(messageId + 1) % 255;
       
@@ -101,20 +208,23 @@ void loop() {
       Serial.println(heatingReturnCelcius);
 
 
-      if ((millis() - lastSerialValueMillis) < 240000) {
+      if ((millis() - lastSerialValueMillis) < 300000) {
         if (serialMessage != 0) {
-          mySwitch.send(serialMessage, 32);
+          if (radio.isChipConnected()) {
+            if(radio.write(&serialMessage, sizeof(unsigned long))) {
+              Serial.print("Message ");
+              Serial.print(serialMessage);
+              Serial.println(" sent");
+            } else {
+              Serial.println("Failed to sent message");
+            }
+          } else {
+            Serial.println("Message will not be sent by NF24, because hardware is NOT connected");
+          }
           Serial.print(F("Sent external="));
           Serial.println(decodeValue(longToMessage(serialMessage)));
         }
-        delay(1000);
-    }
-
-    delay(1000);
-
-    lastPingMillis = millis();
-  }
-  
+      }
 }
 
 /*

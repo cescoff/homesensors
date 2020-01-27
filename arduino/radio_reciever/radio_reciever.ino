@@ -9,15 +9,18 @@
 */
 
 // Include dependant SPI Library 
-#include <RCSwitch.h>
+#include <RF24.h> 
+#include <printf.h>
 #include <SPI.h> 
 
-RCSwitch reciever = RCSwitch();
+// NRF24
+RF24 radio(7, 8); // CE, CSN
+const byte address[6] = "00001";
 
 const bool DEBUG = false;
 
-const int SENSOR_IDS[] = {16, 15, 14, 13, 12};
-const String SENSOR_UUIDS[] = {"eef014ca-4261-40a8-aecd-ec41e466e5d0", "c4944883-1151-4263-9e7b-965e285e212c", "5f7cee1f-2e74-48b4-a53a-9be4bbe0abec", "c6f07270-c345-4e6d-9098-2c758efcc13f", "9ad754a1-4ae1-4a73-9658-734e19747617"};
+const int SENSOR_IDS[] = {16, 15, 14, 13, 12, 11};
+const String SENSOR_UUIDS[] = {"eef014ca-4261-40a8-aecd-ec41e466e5d0", "c4944883-1151-4263-9e7b-965e285e212c", "5f7cee1f-2e74-48b4-a53a-9be4bbe0abec", "c6f07270-c345-4e6d-9098-2c758efcc13f", "9ad754a1-4ae1-4a73-9658-734e19747617", "f10e6f83-0b15-45d6-9af0-332753fd8b9b"};
 
 unsigned long timer = 0;
 
@@ -26,19 +29,22 @@ void setup()
     // Initialize ASK Object
     // Setup Serial Monitor
     Serial.begin(9600);
-    reciever.enableReceive(0);  // Receiver on interrupt 0 => that is pin #2
+    radio.begin();
+    radio.openReadingPipe(0, address);
+    radio.setPALevel(RF24_PA_MAX);
+    radio.startListening();
+  
+    printf_begin();
+    radio.printDetails();
 }
 
 void loop()
 {
-    if (reciever.available()) {
-  
-  //    Serial.println(reciever.getReceivedValue());
-  
-      unsigned long num = reciever.getReceivedValue();
-  
-  
-      reciever.resetAvailable();
+  if (radio.available()) {
+      unsigned long num;
+      radio.read(&num, sizeof(unsigned long));
+//      Serial.print("radio.read()::");
+//      Serial.println(num);
   
       String message = longToMessage(num);
       //Serial.println( message );
@@ -52,7 +58,8 @@ void loop()
           Serial.print(SENSOR_UUIDS[i]);
           Serial.print(F(";C="));
           Serial.println(value);
-          delay(1000);
+          Serial.flush();
+          delay(100);
         }
       }
   

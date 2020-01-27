@@ -1,6 +1,7 @@
 package com.desi.data.bean;
 
 import com.desi.data.SensorRecord;
+import com.desi.data.SensorType;
 import com.desi.data.SensorUnit;
 import org.apache.commons.lang.StringUtils;
 import org.joda.time.LocalDateTime;
@@ -64,5 +65,10 @@ public class GPSLatitudeSensorRecord implements SensorRecord {
     @Override
     public SensorUnit getUnit() {
         return SensorUnit.POSITION;
+    }
+
+    @Override
+    public SensorType getType() {
+        return SensorType.POSITION;
     }
 }

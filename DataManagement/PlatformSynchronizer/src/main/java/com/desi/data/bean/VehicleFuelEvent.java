@@ -3,6 +3,7 @@ package com.desi.data.bean;
 
 import com.desi.data.CarSensorRecord;
 import com.desi.data.SensorRecord;
+import com.desi.data.SensorType;
 import com.desi.data.SensorUnit;
 import org.joda.time.LocalDateTime;
 import org.joda.time.format.DateTimeFormat;
@@ -121,6 +122,11 @@ public class VehicleFuelEvent implements CarSensorRecord, Exportable {
     @Override
     public SensorUnit getUnit() {
         return SensorUnit.GASOLINE_CONSUMPTION;
+    }
+
+    @Override
+    public SensorType getType() {
+        return SensorType.DISTANCE_ODOMETER;
     }
 
     public String toString() {

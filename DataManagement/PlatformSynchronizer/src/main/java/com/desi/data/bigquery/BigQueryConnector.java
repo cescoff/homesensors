@@ -257,9 +257,9 @@ public class BigQueryConnector implements Connector, SensorNameProvider {
             final TableId aggregatedDataTableId = aggregatedDataTable.getTableId();
             for (final String sensorId : getAllSensorIds()) {
                 for (final AggregationScope scope : AggregationScope.values()) {
-                    logger.info("Performing '" + scope.name() + "' aggregation for sensor '" + sensorId + "'");
+                    logger.info("Performing '" + scope.name() + "' aggregation for sensor " + getDisplayName(sensorId) + "[" + sensorId + "]");
                     final Iterable<AggregatedSensorRecord> aggregatedSensorRecords = getAggregatedValues(sensorId, scope);
-                    logger.info("Found " + Iterables.size(aggregatedSensorRecords) + " aggregated records for sensor '" + sensorId + "' on scope '" + scope.name() + "'");
+                    logger.info("Found " + Iterables.size(aggregatedSensorRecords) + " aggregated records for sensor " + getDisplayName(sensorId) + "[" + sensorId + "] on scope '" + scope.name() + "'");
 
                     for (final Iterable<AggregatedSensorRecord> page : Iterables.partition(aggregatedSensorRecords, 10000)) {
                         final InsertAllRequest.Builder insertAllRequest = InsertAllRequest.newBuilder(aggregatedDataTableId);

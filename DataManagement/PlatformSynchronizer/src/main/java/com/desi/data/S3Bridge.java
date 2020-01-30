@@ -8,6 +8,7 @@ import com.amazonaws.services.s3.model.GetObjectRequest;
 import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
+import com.desi.data.aggregation.HeatBurnAggregator;
 import com.desi.data.bean.HeatBurnSensorRecord;
 import com.desi.data.bean.TemperatureRecord;
 import com.desi.data.bigquery.BigQueryConnector;
@@ -15,6 +16,8 @@ import com.desi.data.config.PlatformCredentialsConfig;
 import com.desi.data.impl.StaticSensorNameProvider;
 import com.desi.data.spreadsheet.SpreadSheetConverter;
 import com.desi.data.utils.JAXBUtils;
+import com.desi.data.utils.LogUtils;
+import com.desi.data.utils.TemperatureCSVParser;
 import com.desi.data.zoho.ZohoFileConnector;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.common.base.Function;
@@ -38,9 +41,6 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class S3Bridge {
 
     private static Logger logger = LoggerFactory.getLogger(S3Bridge.class);
-
-    private static final DateTimeFormatter CSV_FORMATTER_1 = DateTimeFormat.forPattern("yyyy-MM-dd HH:mm:ss");
-    private static final DateTimeFormatter CSV_FORMATTER_2 = DateTimeFormat.forPattern("dd/MM/yyyy HH:mm:ss");
 
     private static final String BUCKET_NAME = "desi-sensors";
 
@@ -123,7 +123,7 @@ public class S3Bridge {
                 if (StringUtils.contains(os.getKey(), folder + "/") && !StringUtils.contains(os.getKey(), "archives/")) {
                     S3Object fullObject = s3.getObject(new GetObjectRequest(os.getBucketName(), os.getKey()));
                     logger.info("Parsing content for object s3://" + os.getBucketName() + "/" + os.getKey());
-                    records.addAll(parseContent(fullObject.getObjectContent()));
+                    records.addAll(TemperatureCSVParser.parseContent(fullObject.getObjectContent()));
                 }
             } catch (Exception e) {
                 logger.error("Failed to parse file s3://" + os.getBucketName() + "/" + os.getKey() + ": " + e.getMessage(), e);
@@ -144,21 +144,11 @@ public class S3Bridge {
                     if (!newRecordsBySensorUUID.containsKey(heatBurnSensorUUID)) {
                         newRecordsBySensorUUID.put(heatBurnSensorUUID, Lists.newArrayList());
                     }
-                    TemperatureRecord previousValue = null;
-                    logger.info("Handling heat burns records on sensor '" + this.sensorNameProvider.getDisplayName(sensorUUID) + "'");
-                    for (final SensorRecord sensorRecord : Ordering.natural().onResultOf(SENSORRECORD_SORT).sortedCopy(recordsBySensorUUID.get(sensorUUID))) {
-                        if (sensorRecord instanceof  TemperatureRecord) {
-                            final TemperatureRecord temperatureRecord = (TemperatureRecord) sensorRecord;
-                            if (previousValue != null) {
-                                final HeatBurnSensorRecord heatBurnSensorRecord = new HeatBurnSensorRecord(heatBurnSensorUUID, previousValue, temperatureRecord);
-                                if (heatBurnSensorRecord.getValue() > 0) {
-                                    records.add(heatBurnSensorRecord);
-                                    newRecordsBySensorUUID.get(heatBurnSensorUUID).add(heatBurnSensorRecord);
-                                }
-                            }
-                            previousValue = temperatureRecord;
-                        }
+                    final HeatBurnAggregator heatBurnAggregator = new HeatBurnAggregator(LocalDateTime.now().minusMonths(1), LocalDateTime.now(), this.sensorNameProvider);
+                    for (final SensorRecord sensorRecord : recordsBySensorUUID.get(sensorUUID)) {
+                        heatBurnAggregator.add(sensorRecord);
                     }
+                    Iterables.addAll(newRecordsBySensorUUID.get(heatBurnSensorUUID), heatBurnAggregator.compute().get(sensorUUID));
                 }
 
             }
@@ -206,7 +196,11 @@ public class S3Bridge {
                     final Optional<LocalDateTime> checkpointValue = connector.getCheckPointValue(sensorUUID);
                     if (checkpointValue.isPresent()) {
                         checkpoints.put(sensorUUID, checkpointValue.get());
-                        logger.info("[" + sensorUUID + "] Adding records from checkpoint value for'" + checkpointValue.get() + "'");
+                        String sensorName = this.sensorNameProvider.getDisplayName(sensorUUID);
+                        if (connector instanceof SensorNameProvider) {
+                            sensorName = ((SensorNameProvider) connector).getDisplayName(sensorUUID);
+                        }
+                        logger.info(sensorName + "[" + sensorUUID + "] Adding records from checkpoint value for'" + checkpointValue.get() + "'");
                     }
                 }
 
@@ -275,61 +269,16 @@ public class S3Bridge {
         return index;
     }
 
-    private static Iterable<TemperatureRecord> parseContent(final InputStream content) throws Exception {
-
-        final InputStreamReader inputStreamReader = new InputStreamReader(content);
-
-        final LineIterator lineIterator = new LineIterator(inputStreamReader);
-
-        final ImmutableList.Builder<TemperatureRecord> result = ImmutableList.builder();
-
-        while (lineIterator.hasNext()) {
-            final String line = lineIterator.nextLine();
-            final String[] elements = StringUtils.split(line, ";");
-            if (elements.length >= 4) {
-                final String sensorUUID = StringUtils.trim(elements[0]);
-                final String dateTimeString = elements[1] + " " + elements[2];
-                final float value = new Double(StringUtils.remove(elements[3], "C=")).floatValue();
-
-                if (value != 85.0) {
-                    result.add(new TemperatureRecord(parseDateTime(dateTimeString), value, sensorUUID, new StaticSensorNameProvider().getType(sensorUUID)));
-                }
-            } else {
-                throw new Exception("UNPARSABLE LINE '" + line + "'");
-            }
-        }
-
-        content.close();
-
-        return result.build();
-    }
-
-    private static LocalDateTime parseDateTime(final String dateTimeString) {
-        try {
-            return CSV_FORMATTER_1.parseDateTime(dateTimeString).toLocalDateTime();
-        } catch (Throwable t) {
-            return CSV_FORMATTER_2.parseDateTime(dateTimeString).toLocalDateTime();
-        }
-    }
-
     public static void main(String[] args) {
         if (args.length != 1) {
             System.out.println("Usage " + S3Bridge.class.getSimpleName() + " <CREDENTIALS_FILE_PATH>");
             System.exit(2);
             return;
         }
-        final Properties logConfig = new Properties();
 
-        logConfig.setProperty("log4j.rootLogger", "INFO, Appender1,Appender2");
-        logConfig.setProperty("log4j.appender.Appender1", "org.apache.log4j.ConsoleAppender");
-        logConfig.setProperty("log4j.appender.Appender1.layout", "org.apache.log4j.PatternLayout");
-        logConfig.setProperty("log4j.appender.Appender1.layout.ConversionPattern", "%-7p %d [%t] %c %x - %m%n");
-        logConfig.setProperty("log4j.appender.Appender2", "org.apache.log4j.FileAppender");
-        logConfig.setProperty("log4j.appender.Appender2.File", "logs/synchronizer.log");
-        logConfig.setProperty("log4j.appender.Appender2.layout", "org.apache.log4j.PatternLayout");
-        logConfig.setProperty("log4j.appender.Appender2.layout.ConversionPattern", "%-7p %d [%t] %c %x - %m%n");
+        LogUtils.configure("synchronizer.log");
 
-        PropertyConfigurator.configure(logConfig);
+
         try {
 /*            if (!new S3Bridge(ImmutableList.<Connector>of(new SpreadSheetConverter()), new File(args[0]), PlatformClientId.S3Bridge).sync()) {
                 logger.warn("Synchronization process returned any data synchronized");

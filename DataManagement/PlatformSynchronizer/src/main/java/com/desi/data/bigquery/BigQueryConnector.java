@@ -739,7 +739,11 @@ public class BigQueryConnector implements Connector, SensorNameProvider {
         if (fuelEventCheckPoint.isPresent()) {
             return fuelEventCheckPoint;
         }
-        return getPositionCheckpointValue(sensorId);
+        final Optional<LocalDateTime> positionCheckpointValue = getPositionCheckpointValue(sensorId);
+        if (positionCheckpointValue.isPresent()) {
+            return  positionCheckpointValue;
+        }
+        return Optional.of(new LocalDateTime("2019-11-05T00:00:00"));
     }
 
     @Override

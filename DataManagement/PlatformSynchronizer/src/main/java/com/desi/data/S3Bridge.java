@@ -144,7 +144,7 @@ public class S3Bridge {
                     if (!newRecordsBySensorUUID.containsKey(heatBurnSensorUUID)) {
                         newRecordsBySensorUUID.put(heatBurnSensorUUID, Lists.newArrayList());
                     }
-                    final HeatBurnAggregator heatBurnAggregator = new HeatBurnAggregator(LocalDateTime.now().minusMonths(1), LocalDateTime.now(), this.sensorNameProvider);
+                    final HeatBurnAggregator heatBurnAggregator = new HeatBurnAggregator(LocalDateTime.now().minusDays(10), LocalDateTime.now(), this.sensorNameProvider);
                     for (final SensorRecord sensorRecord : recordsBySensorUUID.get(sensorUUID)) {
                         heatBurnAggregator.add(sensorRecord);
                     }
@@ -201,6 +201,8 @@ public class S3Bridge {
                             sensorName = ((SensorNameProvider) connector).getDisplayName(sensorUUID);
                         }
                         logger.info(sensorName + "[" + sensorUUID + "] Adding records from checkpoint value for'" + checkpointValue.get() + "'");
+                    } else {
+                        logger.info("No checkpoint for " + this.sensorNameProvider.getDisplayName(sensorUUID) + "[" + sensorUUID + "]");
                     }
                 }
 

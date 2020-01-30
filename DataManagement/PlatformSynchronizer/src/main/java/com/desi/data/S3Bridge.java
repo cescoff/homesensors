@@ -153,6 +153,7 @@ public class S3Bridge {
 
             }
             for (final String newSensorUUID : newRecordsBySensorUUID.keySet()) {
+                records.addAll(newRecordsBySensorUUID.get(newSensorUUID));
                 if (!recordsBySensorUUID.containsKey(newSensorUUID)) {
                     recordsBySensorUUID.put(newSensorUUID, newRecordsBySensorUUID.get(newSensorUUID));
                 } else {

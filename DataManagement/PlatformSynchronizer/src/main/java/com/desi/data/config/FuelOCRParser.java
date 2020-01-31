@@ -421,6 +421,15 @@ public class FuelOCRParser {
             if (StringUtils.containsIgnoreCase(text, "LITR")) {
                 return true;
             }
+            if (StringUtils.containsIgnoreCase(text, "SP98")) {
+                return true;
+            }
+            if (StringUtils.containsIgnoreCase(text, "SP9")) {
+                return true;
+            }
+            if (StringUtils.containsIgnoreCase(text, "SP")) {
+                return true;
+            }
         }
 
         return false;

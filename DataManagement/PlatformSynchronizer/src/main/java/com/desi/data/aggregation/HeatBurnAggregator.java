@@ -98,9 +98,9 @@ public class HeatBurnAggregator {
                                 if (delta > 0) {
                                     if (start.isBefore(currentBurn.get(burnIndex).getDateTaken()) && currentBurn.get(burnIndex).getDateTaken().isBefore(end)) {
                                         float time = ((currentBurn.get(burnIndex + 1).getDateTaken().toDate().getTime() - currentBurn.get(burnIndex).getDateTaken().toDate().getTime()) / 1000);
-                                        final float value = delta * time + ((currentBurn.get(burnIndex + 1).getValue() - currentBurn.get(burnIndex).getValue()) / 2) * time;
+                                        //final float value = delta * time + ((currentBurn.get(burnIndex + 1).getValue() - currentBurn.get(burnIndex).getValue()) / 2) * time;
                                         final LocalDateTime dateTaken = currentBurn.get(burnIndex).getDateTaken();
-                                        records.add(generateRecord(this.sensorNameProvider.getBurnerUUID("corentin.escoffier@gmail.com"), dateTaken, value));
+                                        records.add(generateRecord(this.sensorNameProvider.getBurnerUUID("corentin.escoffier@gmail.com"), dateTaken, time));
                                     }
                                 }
                             }

@@ -63,7 +63,7 @@ public class DefaultAggregatedSensorRecord implements AggregatedSensorRecord {
     }
 
     public boolean hasSensorValue(final String uuid) {
-        return recordsByUUID.containsKey(uuid);
+        return recordsByUUID.isEmpty() || recordsByUUID.containsKey(uuid);
     }
 
     public boolean addValue(SensorRecord record) {

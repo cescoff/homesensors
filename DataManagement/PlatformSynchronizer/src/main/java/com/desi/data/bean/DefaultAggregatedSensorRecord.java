@@ -63,7 +63,12 @@ public class DefaultAggregatedSensorRecord implements AggregatedSensorRecord {
     }
 
     public boolean hasSensorValue(final String uuid) {
-        return recordsByUUID.isEmpty() || recordsByUUID.containsKey(uuid);
+        if (sensorNameProvider.getType(uuid) == SensorType.GAS_VOLUME_ODOMETER) {
+            if (recordsByUUID.isEmpty()) {
+                return true;
+            }
+        }
+        return recordsByUUID.containsKey(uuid);
     }
 
     public boolean addValue(SensorRecord record) {

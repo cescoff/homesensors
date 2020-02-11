@@ -4,14 +4,14 @@ import com.desi.data.config.PlatformCredentialsConfig;
 import com.google.api.gax.core.FixedCredentialsProvider;
 import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
-import com.google.cloud.automl.v1beta1.*;
+//import com.google.cloud.automl.v1beta1.*;
 import com.google.cloud.vision.v1.*;
 import com.google.cloud.vision.v1.Image;
 import com.google.protobuf.ByteString;import com.google.common.collect.ImmutableList;
 import com.google.common.collect.Lists;
-import com.google.protobuf.ByteString;
+//import com.google.protobuf.ByteString;
 import com.google.protobuf.Descriptors;
-import com.google.protobuf.InvalidProtocolBufferException;
+//import com.google.protobuf.InvalidProtocolBufferException;
 import org.apache.commons.lang.StringUtils;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,15 +29,15 @@ public class VisionConnector {
 
     private static Logger logger = LoggerFactory.getLogger(VisionConnector.class);
 
-    private final String autoMLProjectId;
-    private final String autoMLModelId;
+//    private final String autoMLProjectId;
+//    private final String autoMLModelId;
 
     private ImageAnnotatorClient vision = null;
-    private PredictionServiceClient autoML = null;
+//    private PredictionServiceClient autoML = null;
 
     public VisionConnector(String autoMLProjectId, String autoMLModelId) {
-        this.autoMLProjectId = autoMLProjectId;
-        this.autoMLModelId = autoMLModelId;
+//        this.autoMLProjectId = autoMLProjectId;
+//        this.autoMLModelId = autoMLModelId;
     }
 
     public boolean begin(final PlatformCredentialsConfig.Credentials credentials, final File configDir) throws IOException {
@@ -64,9 +64,9 @@ public class VisionConnector {
         // Instantiate a client.
         this.vision =
                 ImageAnnotatorClient.create(ImageAnnotatorSettings.newBuilder().setCredentialsProvider(FixedCredentialsProvider.create(googleCredentials)).build());
-        this.autoML =
+/*        this.autoML =
                 PredictionServiceClient.create(PredictionServiceSettings.newBuilder().setCredentialsProvider(FixedCredentialsProvider.create(googleCredentials)).build());
-
+*/
         return true;
 
     }
@@ -101,7 +101,7 @@ public class VisionConnector {
             }
         }
 
-        if (StringUtils.isNotEmpty(autoMLProjectId) && StringUtils.isNotEmpty(autoMLModelId)) {
+/*        if (StringUtils.isNotEmpty(autoMLProjectId) && StringUtils.isNotEmpty(autoMLModelId)) {
             ModelName name = ModelName.of(autoMLProjectId, "us-central1", autoMLModelId);
 
             com.google.cloud.automl.v1beta1.Image image = com.google.cloud.automl.v1beta1.Image.newBuilder().setImageBytes(ByteString.copyFrom(imgBytes)).build();
@@ -124,7 +124,7 @@ public class VisionConnector {
                 }
             }
         }
-
+*/
         return ImmutableList.copyOf(result);
     }
 

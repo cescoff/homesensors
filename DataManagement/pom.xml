@@ -11,6 +11,7 @@
     <modules>
         <module>PlatformSynchronizer</module>
         <module>CommandLine</module>
+        <module>Lambdas</module>
     </modules>
     <dependencies>
         <dependency>

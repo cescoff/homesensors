@@ -1,0 +1,6 @@
+SELECT Id FROM Case WHERE Status='Closed' AND ClosedDate>=LAST_N_DAYS:513 AND Id in (select ParentId from EmailMessage where ArchiveInFileCloud__c=false AND CaseClosedDate__c>=LAST_N_DAYS:513) LIMIT 1000
+
+select Id from EmailMessage where ParentId='5000X00001YFFazQAH'
+select Id from EmailMessage where ParentId='5000X00001Yr6BAQAZ'
+
+select Id from Attachment where ParentId='02s0X00001Cn2m0QAB'

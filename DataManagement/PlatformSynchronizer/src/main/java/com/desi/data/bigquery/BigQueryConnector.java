@@ -8,6 +8,7 @@ import com.google.auth.oauth2.GoogleCredentials;
 import com.google.auth.oauth2.ServiceAccountCredentials;
 import com.google.cloud.bigquery.*;
 import com.google.cloud.bigquery.Table;
+import com.google.common.base.Function;
 import com.google.common.base.Optional;
 import com.google.common.base.Predicate;
 import com.google.common.collect.*;
@@ -199,6 +200,13 @@ public class BigQueryConnector implements Connector, SensorNameProvider {
 
     @Override
     public boolean addRecords(Iterable<SensorRecord> records, SensorNameProvider nameProvider) throws Exception {
+        final Iterable<String> addedUUIDs = ImmutableSet.<String>builder().addAll(Iterables.transform(records, new Function<SensorRecord, String>() {
+            @Nullable
+            @Override
+            public String apply(@Nullable SensorRecord sensorRecord) {
+                return sensorRecord.getSensorUUID();
+            }
+        })).build();
         final Iterable<SensorRecord> rawRecords = Iterables.filter(records, RAW_TABLE_RECORDS);
         final Iterable<VehicleFuelEvent> fuelEvents = Iterables.filter(records, VehicleFuelEvent.class);
         final Iterable<VehiclePosition> positions = Iterables.filter(records, VehiclePosition.class);
@@ -255,7 +263,7 @@ public class BigQueryConnector implements Connector, SensorNameProvider {
             logger.info("Performing aggregations");
 
             final TableId aggregatedDataTableId = aggregatedDataTable.getTableId();
-            for (final String sensorId : getAllSensorIds()) {
+            for (final String sensorId : addedUUIDs) {
                 for (final AggregationScope scope : AggregationScope.values()) {
                     logger.info("Performing '" + scope.name() + "' aggregation for sensor " + getDisplayName(sensorId) + "[" + sensorId + "]");
                     final Iterable<AggregatedSensorRecord> aggregatedSensorRecords = getAggregatedValues(sensorId, scope);

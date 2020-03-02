@@ -9,10 +9,12 @@ import com.amazonaws.services.s3.model.ListObjectsV2Result;
 import com.amazonaws.services.s3.model.S3Object;
 import com.amazonaws.services.s3.model.S3ObjectSummary;
 import com.desi.data.aggregation.HeatBurnAggregator;
+import com.desi.data.athena.AthenaConnector;
 import com.desi.data.bean.HeatBurnSensorRecord;
 import com.desi.data.bean.TemperatureRecord;
 import com.desi.data.bigquery.BigQueryConnector;
 import com.desi.data.config.PlatformCredentialsConfig;
+import com.desi.data.csv.S3CSVDataSource;
 import com.desi.data.impl.StaticSensorNameProvider;
 import com.desi.data.spreadsheet.SpreadSheetConverter;
 import com.desi.data.utils.JAXBUtils;
@@ -28,6 +30,7 @@ import org.apache.commons.io.LineIterator;
 import org.apache.commons.lang.StringUtils;
 import org.apache.log4j.PropertyConfigurator;
 import org.checkerframework.checker.nullness.qual.Nullable;
+import org.joda.time.LocalDate;
 import org.joda.time.LocalDateTime;
 import org.joda.time.format.DateTimeFormat;
 import org.joda.time.format.DateTimeFormatter;
@@ -48,6 +51,8 @@ public class S3Bridge {
 
     private static final String DEFAULT_OWNER_EMAIL = "corentin.escoffier@gmail.com";
 
+    private final DataSource dataSource;
+
     private final Iterable<Connector> connectors;
 
     private final File awsCredentialsConfigurationFile;
@@ -66,7 +71,10 @@ public class S3Bridge {
 
     private SensorNameProvider sensorNameProvider = null;
 
-    public S3Bridge(Iterable<Connector> connectors, File awsCredentialsConfigurationFile, PlatformClientId clientId, final String folder) {
+    private Iterable<DataSource> connectedDataSources = Lists.newArrayList();
+
+    public S3Bridge(DataSource dataSource, Iterable<Connector> connectors, File awsCredentialsConfigurationFile, PlatformClientId clientId, final String folder) {
+        this.dataSource = dataSource;
         this.connectors = connectors;
         this.awsCredentialsConfigurationFile = awsCredentialsConfigurationFile;
         this.clientId = clientId;
@@ -108,59 +116,32 @@ public class S3Bridge {
 
         init();
 
-        final AmazonS3 s3 = AmazonS3ClientBuilder.standard().
-                withCredentials(new AWSStaticCredentialsProvider(new BasicAWSCredentials(accessKey, secretKey))).
-                withRegion(REGION).
-                build();
-        final ListObjectsV2Result result = s3.listObjectsV2(BUCKET_NAME);
-
-        final List<S3ObjectSummary> objects = result.getObjectSummaries();
-
-        final ImmutableList.Builder<SensorRecord> records = ImmutableList.builder();
-
-        for (S3ObjectSummary os : objects) {
-            try {
-                if (StringUtils.contains(os.getKey(), folder + "/") && !StringUtils.contains(os.getKey(), "archives/")) {
-                    S3Object fullObject = s3.getObject(new GetObjectRequest(os.getBucketName(), os.getKey()));
-                    logger.info("Parsing content for object s3://" + os.getBucketName() + "/" + os.getKey());
-                    records.addAll(TemperatureCSVParser.parseContent(fullObject.getObjectContent()));
-                }
-            } catch (Exception e) {
-                logger.error("Failed to parse file s3://" + os.getBucketName() + "/" + os.getKey() + ": " + e.getMessage(), e);
-            }
-        }
-
-        s3.shutdown();
-
-        final Map<String, Iterable<SensorRecord>> recordsBySensorUUID = getSensorRecordsByUUID(records.build());
-
-
-        if (StringUtils.isNotEmpty(this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL))) {
-            final Map<String, List<SensorRecord>> newRecordsBySensorUUID = Maps.newHashMap();
-            for (final String sensorUUID : recordsBySensorUUID.keySet()) {
-                final SensorType sensorType = this.sensorNameProvider.getType(sensorUUID);
-                if (sensorType == SensorType.HEATING_TEMPERATURE || sensorType == SensorType.HEATER_TEMPERATURE) {
-                    final String heatBurnSensorUUID = this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL);
-                    if (!newRecordsBySensorUUID.containsKey(heatBurnSensorUUID)) {
-                        newRecordsBySensorUUID.put(heatBurnSensorUUID, Lists.newArrayList());
+        if (dataSource != null) {
+            final PlatformCredentialsConfig.Credentials credentials;
+            if (dataSource.getPlatformId().isPresent()) {
+                PlatformCredentialsConfig.Credentials candidate = null;
+                for (final PlatformCredentialsConfig.Credentials configuredCredentials : this.credentialsConfig.getCredentials()) {
+                    if (configuredCredentials.getId() == dataSource.getPlatformId().get()) {
+                        candidate = configuredCredentials;
                     }
-                    final HeatBurnAggregator heatBurnAggregator = new HeatBurnAggregator(LocalDateTime.now().minusDays(10), LocalDateTime.now(), this.sensorNameProvider);
-                    for (final SensorRecord sensorRecord : recordsBySensorUUID.get(sensorUUID)) {
-                        heatBurnAggregator.add(sensorRecord);
-                    }
-                    Iterables.addAll(newRecordsBySensorUUID.get(heatBurnSensorUUID), heatBurnAggregator.compute().get(sensorUUID));
                 }
-
+                if (candidate == null) {
+                    logger.error("No credentials found for connector '"
+                            + dataSource.getClass().getSimpleName()
+                            + "' with service '"
+                            + dataSource.getPlatformId().get()
+                            + "' in file '"
+                            + this.awsCredentialsConfigurationFile.getPath()
+                            + "'");
+                    return false;
+                }
+                credentials = candidate;
+            } else {
+                credentials = null;
             }
-            for (final String newSensorUUID : newRecordsBySensorUUID.keySet()) {
-                records.addAll(newRecordsBySensorUUID.get(newSensorUUID));
-                if (!recordsBySensorUUID.containsKey(newSensorUUID)) {
-                    recordsBySensorUUID.put(newSensorUUID, newRecordsBySensorUUID.get(newSensorUUID));
-                } else {
-                    final List<SensorRecord> addedValues = newRecordsBySensorUUID.get(newSensorUUID);
-                    Iterables.addAll(addedValues, recordsBySensorUUID.get(newSensorUUID));
-                    recordsBySensorUUID.put(newSensorUUID, addedValues);
-                }
+            if (!dataSource.begin(credentials, awsCredentialsConfigurationFile.getParentFile())) {
+                logger.error("Failed to begin connector '" + dataSource.getClass().getSimpleName() + "'");
+                return false;
             }
         }
 
@@ -191,9 +172,12 @@ public class S3Bridge {
                 logger.error("Failed to begin connector '" + connector.getClass().getSimpleName() + "'");
             } else {
                 logger.info("Begin of connector '" + connector.getClass().getSimpleName() + "'");
+
+                final Iterable<String> sensorUUIDs = dataSource.getSensorsUUIDs();
+
                 final Map<String, LocalDateTime> checkpoints = Maps.newHashMap();
 
-                for (final String sensorUUID : recordsBySensorUUID.keySet()) {
+                for (final String sensorUUID : sensorUUIDs) {
                     final Optional<LocalDateTime> checkpointValue = connector.getCheckPointValue(sensorUUID);
                     if (checkpointValue.isPresent()) {
                         checkpoints.put(sensorUUID, checkpointValue.get());
@@ -207,32 +191,92 @@ public class S3Bridge {
                     }
                 }
 
+                final ImmutableList.Builder<SensorRecord> records2Add = ImmutableList.builder();
 
-                final Iterable<SensorRecord> filteredSensorRecords = Iterables.filter(records.build(), new Predicate<SensorRecord>() {
-                    public boolean apply(SensorRecord sensorRecord) {
-                        if (!checkpoints.containsKey(sensorRecord.getSensorUUID())) {
-                            return true;
-                        } else {
-                            return sensorRecord.getDateTaken().isAfter(checkpoints.get(sensorRecord.getSensorUUID()));
+                if (StringUtils.isNotEmpty(this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL))) {
+                    final Map<String, Iterable<SensorRecord>> recordsBySensorUUID = Maps.newHashMap();
+                    for (final String sensorUUID : sensorUUIDs) {
+                        if (this.sensorNameProvider.getType(sensorUUID) ==  SensorType.HEATING_TEMPERATURE) {
+                            LocalDateTime checkPoint = checkpoints.get(sensorUUID);
+                            if (checkPoint == null) {
+                                checkPoint = LocalDate.now().withYear(2019).withMonthOfYear(11).withDayOfMonth(1).toDateTimeAtStartOfDay().toLocalDateTime();
+                            } else {
+                                checkPoint = LocalDateTime.now().minusDays(11);
+                            }
+                            recordsBySensorUUID.put(sensorUUID, dataSource.getRecords(sensorUUID, checkPoint));
                         }
                     }
 
-                    public boolean test(@Nullable SensorRecord input) {
-                        return StringUtils.isNotEmpty(input.getSensorUUID());
+                    final Map<String, List<SensorRecord>> newRecordsBySensorUUID = Maps.newHashMap();
+                    for (final String sensorUUID : recordsBySensorUUID.keySet()) {
+                        final SensorType sensorType = this.sensorNameProvider.getType(sensorUUID);
+                        if (sensorType == SensorType.HEATING_TEMPERATURE) {
+                            final String heatBurnSensorUUID = this.sensorNameProvider.getBurnerUUID(DEFAULT_OWNER_EMAIL);
+                            if (!newRecordsBySensorUUID.containsKey(heatBurnSensorUUID)) {
+                                newRecordsBySensorUUID.put(heatBurnSensorUUID, Lists.newArrayList());
+                            }
+                            final HeatBurnAggregator heatBurnAggregator = new HeatBurnAggregator(LocalDateTime.now().minusDays(10), LocalDateTime.now(), this.sensorNameProvider);
+                            for (final SensorRecord sensorRecord : recordsBySensorUUID.get(sensorUUID)) {
+                                heatBurnAggregator.add(sensorRecord);
+                            }
+                            final Iterable<SensorRecord> heatBurnsSensorRecords = heatBurnAggregator.compute().get(sensorUUID);
+                            if (heatBurnsSensorRecords != null) {
+                                Iterables.addAll(newRecordsBySensorUUID.get(heatBurnSensorUUID), heatBurnsSensorRecords);
+                            }
+                        }
+
                     }
-                });
+                    for (final String newSensorUUID : newRecordsBySensorUUID.keySet()) {
+                        records2Add.addAll(newRecordsBySensorUUID.get(newSensorUUID));
+                        if (!recordsBySensorUUID.containsKey(newSensorUUID)) {
+                            recordsBySensorUUID.put(newSensorUUID, newRecordsBySensorUUID.get(newSensorUUID));
+                        } else {
+                            final List<SensorRecord> addedValues = newRecordsBySensorUUID.get(newSensorUUID);
+                            Iterables.addAll(addedValues, recordsBySensorUUID.get(newSensorUUID));
+                            recordsBySensorUUID.put(newSensorUUID, addedValues);
+                        }
+                    }
+                }
 
                 try {
-                    if (!connector.addRecords(filteredSensorRecords, new StaticSensorNameProvider())) {
+                    if (!connector.addRecords(records2Add.build(), this.sensorNameProvider)) {
                         logger.warn("No record sent by connector '" + connector.getClass().getSimpleName() + "'");
-                    } else {
-                        if (!connector.end()) {
-                            logger.error("Failed to end connector '" + connector.getClass().getSimpleName() + "'");
+                    }
+                } catch (Throwable t) {
+                    logger.error("Unexcepted error occured while adding records to connector '" + connector.getClass().getSimpleName() + "'", t);
+                }
+
+                for (final String uuid : checkpoints.keySet()) {
+                    try {
+                        if (!connector.addRecords(dataSource.getRecords(uuid, checkpoints.get(uuid)), this.sensorNameProvider)) {
+                            logger.warn("No record sent by connector '" + connector.getClass().getSimpleName() + "'");
+                        } else {
+                            if (!connector.end()) {
+                                logger.error("Failed to end connector '" + connector.getClass().getSimpleName() + "'");
+                            }
+                        }
+                    } catch (Exception e) {
+                        logger.error("Unexcepted error occured while adding records to connector '" + connector.getClass().getSimpleName() + "'", e);
+                    }
+                }
+
+                for (final String uuid : sensorUUIDs) {
+                    if (!checkpoints.containsKey(uuid)) {
+                        try {
+                            final LocalDateTime checkPoint = LocalDate.now().withYear(2000).withDayOfMonth(1).withMonthOfYear(1).toDateTimeAtStartOfDay().toLocalDateTime();
+                            if (!connector.addRecords(dataSource.getRecords(uuid, checkPoint), this.sensorNameProvider)) {
+                                logger.warn("No record sent by connector '" + connector.getClass().getSimpleName() + "'");
+                            } else {
+                                if (!connector.end()) {
+                                    logger.error("Failed to end connector '" + connector.getClass().getSimpleName() + "'");
+                                }
+                            }
+                        } catch (Exception e) {
+                            logger.error("Unexcepted error occured while adding records to connector '" + connector.getClass().getSimpleName() + "'", e);
                         }
                     }
-                } catch (Exception e) {
-                    logger.error("Unexcepted error occured while adding records to connector '" + connector.getClass().getSimpleName() + "'", e);
                 }
+
             }
         }
 
@@ -287,11 +331,11 @@ public class S3Bridge {
                 logger.warn("Synchronization process returned any data synchronized");
                 System.exit(4);
             }*/
-            if (!new S3Bridge(ImmutableList.<Connector>of(new BigQueryConnector("Records")/*, new SpreadSheetConverter()*/), new File(args[0]), PlatformClientId.S3Bridge, "peri").sync()) {
+            if (!new S3Bridge(new AthenaConnector(new StaticSensorNameProvider()), ImmutableList.<Connector>of(new BigQueryConnector("Records")/*, new SpreadSheetConverter()*/), new File(args[0]), PlatformClientId.S3Bridge, "peri").sync()) {
                 logger.warn("Synchronization process returned any data synchronized");
                 System.exit(4);
             }
-            if (!new S3Bridge(ImmutableList.<Connector>of(new BigQueryConnector("GeangesRecords")/*, new SpreadSheetConverter()*/), new File(args[0]), PlatformClientId.S3Bridge, "geanges").sync()) {
+            if (!new S3Bridge(new S3CSVDataSource(new StaticSensorNameProvider(), "geanges"), ImmutableList.<Connector>of(new BigQueryConnector("GeangesRecords")/*, new SpreadSheetConverter()*/), new File(args[0]), PlatformClientId.S3Bridge, "geanges").sync()) {
                 logger.warn("Synchronization process returned any data synchronized");
                 System.exit(4);
             }

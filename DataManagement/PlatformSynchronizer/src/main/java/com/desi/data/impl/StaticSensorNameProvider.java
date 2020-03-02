@@ -85,7 +85,7 @@ public class StaticSensorNameProvider implements SensorNameProvider {
     @Override
     public AggregationType getAggregationType(String uuid) {
         if (getType(uuid) == null) {
-            return null;
+            return AggregationType.AVG;
         }
         if (getType(uuid) == SensorType.GAS_VOLUME_ODOMETER) {
             return AggregationType.SUM;

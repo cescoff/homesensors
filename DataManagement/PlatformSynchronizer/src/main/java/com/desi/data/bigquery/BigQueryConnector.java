@@ -322,8 +322,6 @@ public class BigQueryConnector implements Connector, SensorNameProvider {
             }
         }
 
-
-
         return true;
     }
 
